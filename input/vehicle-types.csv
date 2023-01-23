@@ -1,0 +1,17 @@
+vehicle_type_id,seating_capacity,standing_room_capacity,length_in_meter,fuel_type,fuel_consumption_in_joule_per_meter,fuel_capacity_in_joule,automation_level,max_velocity,charging_capability,payload_capacity_in_kg
+BIKE-DEFAULT,2,0,1.5,Gasoline,10.6,2210000,,5,,
+FAST-BIKE,2,0,1.5,Gasoline,10.6,2210000,,20,,
+Car,4,0,4.5,Gasoline,3655.98,3655980000,,,,
+DieselCar,4,0,4.5,Diesel,3000,3655980000,,,,
+RH_Car,4,0,4.5,Gasoline,3655.98,3655980000,,,,
+CAV,4,0,4.5,Gasoline,3655.98,3655980000,4,,,
+BEV,4,0,4.5,Electricity,671.22432,53999996.54,,,11,
+PHEV,4,0,4.5,Electricity,671.22432,269999982.7,,,22,
+BUS-DEFAULT,37,20,12.1,Diesel,20048,30000000000,,,,
+RAIL-DEFAULT,801,2052,129.6,Diesel,210518.32,6.00E+11,,,,
+FERRY-DEFAULT,149,0,26,Diesel,701680,1.20E+13,,,,
+SUBWAY-DEFAULT,336,864,129.6,Electricity,46800,46800000000,,,,
+CABLE_CAR-DEFAULT,29,31,8.4,Electricity,1116,1116000000,,,,
+TRAM-DEFAULT,58,19,14,Electricity,3600,3600000000,,,,
+FREIGHT-1,50,50,12,Diesel,25829.7,30000000000,1,,,1500
+FREIGHT-BEV,50,50,12,Electricity,5000,269999982,1,,50,5000

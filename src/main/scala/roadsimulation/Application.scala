@@ -11,7 +11,7 @@ object Application extends ZIOAppDefault {
 
   def run: ZIO[Any, AnyRef, Unit] = for {
     scenario <- Scenario.loadScenario()
-    queue <- Simulation.simulate(scenario)
+    _ <- Simulation.simulate(scenario)
   } yield ()
 
 }

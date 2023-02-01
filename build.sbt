@@ -1,4 +1,5 @@
 val scala3Version = "3.2.1"
+val zioVersion = "2.0.6"
 
 lazy val root = project
   .in(file("."))
@@ -8,7 +9,12 @@ lazy val root = project
 
     scalaVersion := scala3Version,
 
-    libraryDependencies += "dev.zio" %% "zio" % "2.0.2",
+    libraryDependencies += "dev.zio" %% "zio" % zioVersion,
     libraryDependencies += "com.github.tototoshi" %% "scala-csv" % "1.3.10",
-    libraryDependencies += "org.scalameta" %% "munit" % "0.7.29" % Test
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio-test" % zioVersion % Test,
+      "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
+      "dev.zio" %% "zio-test-magnolia" % zioVersion % Test,
+      "dev.zio" %% "zio-test-junit" % zioVersion % Test
+    )
   )

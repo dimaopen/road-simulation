@@ -21,7 +21,7 @@ class VehicleHandlerImpl(
     scenario.tripPlans.values.map { plan =>
       SimEvent(
         plan.startTime,
-        VehicleContinueTraveling(Vehicle(plan.id, plan.vehicleType, plan.initialFuelLevelInJoule, 0), entersRoad = true)
+        VehicleContinueTraveling(Vehicle(plan.id, plan.vehicleType, plan.initialFuelLevelInJoule, positionInM = 0.0), entersRoad = true)
       )(handleContinueTraveling)
     }.toIndexedSeq
   )
@@ -46,7 +46,7 @@ class VehicleHandlerImpl(
             vehicle,
             scenario.speedLimitInMPerS)
     else
-      goToPositionWithObject(None, nextPosition, event.time, vehicle, scenario.speedLimitInMPerS).unit
+      goToPositionWithObject(None, math.min(nextPosition, scenario.roadLengthInM), event.time, vehicle, scenario.speedLimitInMPerS).unit
           
   private def handleVehicleAtPosition(event: SimEvent[VehicleAtPosition[FillingStationObject]]): UIO[Unit] = {
     event.eventType.possibleObject match

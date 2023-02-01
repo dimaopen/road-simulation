@@ -83,8 +83,8 @@ class FillingStationObject(val fillingStation: FillingStation, scheduler: Simula
   private def timeToFill(vehicle: Vehicle): Double =
     import FuelType.*
     vehicle.vehicleType.fuelType match
-      case Gasoline | Diesel => 180
-      case Propane | Methane => 600
+      case Gasoline | Diesel => 450
+      case Propane | Methane => 900
       case Electricity => math.max(0, vehicle.vehicleType.fuelCapacityInJoule - vehicle.fuelLevelInJoule) / vehicle.vehicleType.chargingCapability.getOrElse(100.0)
 
   private def caclAddedFuel(vehicle: Vehicle, fuelingTime: Double): Double =

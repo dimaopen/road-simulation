@@ -2,5 +2,6 @@ station_id,position_in_km,Gasoline,Gasoline_price,Diesel,Diesel_price
 Sibneft-1,100,10,45,4,55 
 Lukoil-1,200,10,50,5,60 
 Rosneft-1,220,6,49,2,58 
-Rosneft-2,450,6,49,2,58
+Magnum,345,6,49,2,58
+Rosneft-3,450,6,49,2,58
 Lukoil-2,550,6,50,1,60 

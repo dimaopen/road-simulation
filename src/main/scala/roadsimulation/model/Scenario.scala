@@ -31,8 +31,10 @@ object Scenario {
         "BUS-DEFAULT",
       ).map(Id.apply[VehicleType])
       desiredTypes = vehicleTypes.filter(vehicleType => desiredVehicleTypeIds.contains(vehicleType.id))
-      _ <- if (desiredTypes.isEmpty) ZIO.fail(new IllegalArgumentException("No desired vehicle types presented")) else ZIO.unit
-      tripPlans <- generateTripPlans(1, NonEmptyChunk(desiredTypes.head, desiredTypes.tail: _*), 4 * 3600, 22 * 3600, 777)
+      _ <- ZIO.when (desiredTypes.isEmpty) {
+        ZIO.fail(new IllegalArgumentException("No desired vehicle types presented"))
+      }
+      tripPlans <- generateTripPlans(20, NonEmptyChunk(desiredTypes.head, desiredTypes.tail: _*), 4 * 3600, 4 * 3600 + 2, 777)
     } yield Scenario(600_000.0, 100, 86400 * 2, fillingStations, tripPlans)
   }
 
@@ -42,7 +44,7 @@ object Scenario {
       vehicleType = vehicleTypes(typeNum)
       startTime <- Random.nextIntBetween(startTime, endTime)
       initialFuelLevel <- Random.nextDoubleBetween(0.3, 1.0)
-      searchStationThreshold <- Random.nextDoubleBetween(20_000, 200_0000)
+      searchStationThreshold <- Random.nextDoubleBetween(20_000, 200_000)
     } yield TripPlan(
       Id(idNum.toString),
       vehicleType,

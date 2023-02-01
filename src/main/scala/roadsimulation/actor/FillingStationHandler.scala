@@ -24,13 +24,13 @@ class FillingStationHandlerImpl(
 
 
 object FillingStationHandler:
-  def make(scenario: Scenario, scheduler: SimulationScheduler[RoadEventType]): UIO[FillingStationHandler] = ZIO.collectAll(
+  def make(scenario: Scenario, scheduler: SimulationScheduler): UIO[FillingStationHandler] = ZIO.collectAll(
     scenario.fillingStations.values
-    .map(station => for {
-      counter <- Ref.make(0)
-      queue <- Ref.make((TreeSet.empty[QueueEntry], TreeSet.empty[QueueEntry]))
-    } yield station.positionInM -> new FillingStationObject(station, scheduler, counter, queue)
-    )
+      .map(station => for {
+        counter <- Ref.make(0)
+        queue <- Ref.make((TreeSet.empty[QueueEntry], TreeSet.empty[QueueEntry]))
+      } yield station.positionInM -> new FillingStationObject(station, scheduler, counter, queue)
+      )
   ).map(stations => new FillingStationHandlerImpl(scenario, TreeMap.from(stations)))
 
 case class QueueEntry(vehicle: Vehicle, enterTime: Double, number: Int)
@@ -39,9 +39,15 @@ object QueueEntry:
   given containerOrdering[T]: Ordering[QueueEntry] = Ordering.by(entry => entry.enterTime -> entry.number)
 
 final case class FillingFinished(queueEntry: QueueEntry) extends RoadEventType
+
 final case class ExitFromFillingStation(time: Double, vehicle: Vehicle)
 
-class FillingStationObject(val fillingStation: FillingStation, scheduler: SimulationScheduler[RoadEventType], counter: Ref[Int], queue: Ref[(TreeSet[QueueEntry], TreeSet[QueueEntry])]):
+class FillingStationObject(
+  val fillingStation: FillingStation,
+  scheduler: SimulationScheduler,
+  counter: Ref[Int],
+  queue: Ref[(TreeSet[QueueEntry], TreeSet[QueueEntry])]
+):
   def enter(vehicle: Vehicle, enterTime: Double): UIO[ExitFromFillingStation] = {
     val ttf = timeToFill(vehicle)
     scheduler.holdUntil(enterTime + ttf)
@@ -56,12 +62,12 @@ class FillingStationObject(val fillingStation: FillingStation, scheduler: Simula
     for {
       number <- counter.updateAndGet(_ + 1)
       queueEntry = QueueEntry(vehicle, currentTime, number)
-      _ <- queue.update{ case (places, entries) =>
+      _ <- queue.update { case (places, entries) =>
         places -> (entries + queueEntry)
       }
     } yield ???
-    //we need to hold somehow until our vehicle is out of the queue and filled
-    //maybe we could sleep until event?
+  //we need to hold somehow until our vehicle is out of the queue and filled
+  //maybe we could sleep until event?
 
   private def handleQueue() = {
     for {
@@ -85,7 +91,10 @@ class FillingStationObject(val fillingStation: FillingStation, scheduler: Simula
     vehicle.vehicleType.fuelType match
       case Gasoline | Diesel => 450
       case Propane | Methane => 900
-      case Electricity => math.max(0, vehicle.vehicleType.fuelCapacityInJoule - vehicle.fuelLevelInJoule) / vehicle.vehicleType.chargingCapability.getOrElse(100.0)
+      case Electricity => math.max(0,
+        vehicle.vehicleType.fuelCapacityInJoule - vehicle.fuelLevelInJoule) / vehicle.vehicleType
+        .chargingCapability
+        .getOrElse(100.0)
 
   private def caclAddedFuel(vehicle: Vehicle, fuelingTime: Double): Double =
     import FuelType.*

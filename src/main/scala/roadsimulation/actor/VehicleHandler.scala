@@ -14,14 +14,15 @@ trait VehicleHandler
 
 class VehicleHandlerImpl(
   scenario: Scenario,
-  scheduler: SimulationScheduler[RoadEventType],
+  scheduler: SimulationScheduler,
   fillingStationHandler: FillingStationHandler
 ) extends VehicleHandler:
   def initialEvents(scenario: Scenario): UIO[IndexedSeq[SimEvent[VehicleContinueTraveling]]] = ZIO.succeed(
     scenario.tripPlans.values.map { plan =>
       SimEvent(
         plan.startTime,
-        VehicleContinueTraveling(Vehicle(plan.id, plan.vehicleType, plan.initialFuelLevelInJoule, positionInM = 0.0), entersRoad = true)
+        VehicleContinueTraveling(Vehicle(plan.id, plan.vehicleType, plan.initialFuelLevelInJoule, positionInM = 0.0),
+          entersRoad = true)
       )(handleContinueTraveling)
     }.toIndexedSeq
   )
@@ -30,9 +31,10 @@ class VehicleHandlerImpl(
     val vehicle = event.eventType.vehicle
     val currentPosition = vehicle.positionInM
     if (currentPosition >= scenario.roadLengthInM)
-      // we reached the destination, end up here
+    // we reached the destination, end up here
       return ZIO.unit
-    val nextPosition = calculatePositionToStartSearchingForFuelStation(vehicle, scenario.tripPlans(vehicle.id).startSearchingForFillingStationThresholdInM)
+    val nextPosition = calculatePositionToStartSearchingForFuelStation(vehicle,
+      scenario.tripPlans(vehicle.id).startSearchingForFillingStationThresholdInM)
     if (nextPosition <= currentPosition)
       fillingStationHandler.findNearestStationAfter(currentPosition) match
         case Some(station) =>
@@ -46,8 +48,12 @@ class VehicleHandlerImpl(
             vehicle,
             scenario.speedLimitInMPerS)
     else
-      goToPositionWithObject(None, math.min(nextPosition, scenario.roadLengthInM), event.time, vehicle, scenario.speedLimitInMPerS).unit
-          
+      goToPositionWithObject(None,
+        math.min(nextPosition, scenario.roadLengthInM),
+        event.time,
+        vehicle,
+        scenario.speedLimitInMPerS).unit
+
   private def handleVehicleAtPosition(event: SimEvent[VehicleAtPosition[FillingStationObject]]): UIO[Unit] = {
     event.eventType.possibleObject match
       case Some(fillingStationObject) =>

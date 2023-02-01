@@ -11,11 +11,13 @@ import java.nio.file.{Path, Paths}
  */
 case class Id[T](value: String)
 
-case class Scenario(roadLengthInM: Double,
-                    speedLimitInKmPerHour: Double,
-                    endTime: Int,
-                    fillingStations: Map[Id[FillingStation], FillingStation],
-                    tripPlans: Map[Id[TripPlan], TripPlan]) {
+case class Scenario(
+  roadLengthInM: Double,
+  speedLimitInKmPerHour: Double,
+  endTime: Int,
+  fillingStations: Map[Id[FillingStation], FillingStation],
+  tripPlans: Map[Id[TripPlan], TripPlan]
+) {
   val speedLimitInMPerS: Double = speedLimitInKmPerHour / 3.6
 }
 
@@ -31,18 +33,28 @@ object Scenario {
         "BUS-DEFAULT",
       ).map(Id.apply[VehicleType])
       desiredTypes = vehicleTypes.filter(vehicleType => desiredVehicleTypeIds.contains(vehicleType.id))
-      _ <- ZIO.when (desiredTypes.isEmpty) {
+      _ <- ZIO.when(desiredTypes.isEmpty) {
         ZIO.fail(new IllegalArgumentException("No desired vehicle types presented"))
       }
-      tripPlans <- generateTripPlans(20, NonEmptyChunk(desiredTypes.head, desiredTypes.tail: _*), 4 * 3600, 4 * 3600 + 2, 777)
+      tripPlans <- generateTripPlans(20,
+        NonEmptyChunk(desiredTypes.head, desiredTypes.tail: _*),
+        4 * 3600,
+        4 * 3600 + 2,
+        777)
     } yield Scenario(600_000.0, 100, 86400 * 2, fillingStations, tripPlans)
   }
 
-  def generateTripPlans(n: Int, vehicleTypes: NonEmptyChunk[VehicleType], startTime: Int, endTime: Int, seed: Int): UIO[Map[Id[TripPlan], TripPlan]] = {
+  def generateTripPlans(
+    n: Int,
+    vehicleTypes: NonEmptyChunk[VehicleType],
+    startTime: Int,
+    endTime: Int,
+    seed: Int
+  ): UIO[Map[Id[TripPlan], TripPlan]] = {
     def createTripPlan(idNum: Int): UIO[TripPlan] = for {
       typeNum <- Random.nextIntBounded(vehicleTypes.size)
       vehicleType = vehicleTypes(typeNum)
-      startTime <- Random.nextIntBetween(startTime, endTime)
+      startTime <- Random.nextDoubleBetween(startTime, endTime)
       initialFuelLevel <- Random.nextDoubleBetween(0.3, 1.0)
       searchStationThreshold <- Random.nextDoubleBetween(20_000, 200_000)
     } yield TripPlan(
@@ -64,7 +76,8 @@ object Scenario {
       val positionInM = row("position_in_km").toDouble * 1000
       val numGas = row(Gasoline.toString).toInt
       val numDiesel = row(Diesel.toString).toInt
-      val places = IndexedSeq.fill(numDiesel)(Set(Gasoline, Diesel)) ++ IndexedSeq.fill(numGas - numDiesel)(Set(Gasoline))
+      val places = IndexedSeq.fill(numDiesel)(Set(Gasoline,
+        Diesel)) ++ IndexedSeq.fill(numGas - numDiesel)(Set(Gasoline))
       FillingStation(id, positionInM, places, Map.empty)
     }
 

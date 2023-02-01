@@ -13,8 +13,8 @@ import scala.collection.immutable.SortedSet
 /**
  * @author Dmitry Openkov
  */
-trait SimulationScheduler[-T]:
-  def schedule(simEvent: SimEvent[T]): UIO[Unit]
+trait SimulationScheduler:
+  def schedule[T](simEvent: SimEvent[T]): UIO[Unit]
 
   def holdUntil(time: Double): UIO[HoldFinished]
 
@@ -47,34 +47,34 @@ object SimulationScheduler:
   enum HoldStatus:
     case ItsTime, Interrupted
 
-  def make[T](): UIO[SimulationScheduler[T]] =
+  def make(): UIO[SimulationScheduler] =
     for {
       counter <- Ref.make(1L)
       //we put an event that prevents scheduler from get running
-      processedSet <- Ref.make(SortedSet(zeroEvent[T]()))
-      eventQueue <- Ref.make(SortedSet.empty[EventContainer[T]])
-    } yield new SimulationSchedulerImpl[T](counter, processedSet, eventQueue, 30.0)
+      processedSet <- Ref.make(SortedSet(zeroEvent()))
+      eventQueue <- Ref.make(SortedSet.empty[EventContainer])
+    } yield new SimulationSchedulerImpl(counter, processedSet, eventQueue, 30.0)
 
-  private[simulation] def zeroEvent[T]() = EventContainer(0, SimEvent(Double.NegativeInfinity, null.asInstanceOf[T]))
+  private[simulation] def zeroEvent() = EventContainer(0, SimEvent(Double.NegativeInfinity, null))
 
-class SimulationSchedulerImpl[T]( //todo move type parameter to schedule method
+class SimulationSchedulerImpl(
   // event counter to separate events of the same time
   counter: Ref[Long],
   // events that is being processed
-  processedSet: Ref[SortedSet[EventContainer[T]]],
+  beingProcessedRef: Ref[SortedSet[EventContainer]],
   // queued events
-  eventQueue: Ref[SortedSet[EventContainer[T]]],
+  eventQueueRef: Ref[SortedSet[EventContainer]],
   parallelismWindow: Double
-) extends SimulationScheduler[T]:
+) extends SimulationScheduler:
 
-  override def schedule(simEvent: SimEvent[T]): UIO[Unit] =
+  override def schedule[T](simEvent: SimEvent[T]): UIO[Unit] =
   // just put the event in the queue
     for {
-      beingProcessed <- processedSet.get
+      beingProcessed <- beingProcessedRef.get
       now = getTimeOfFirstEvent(beingProcessed, Double.NaN)
       _ <- ZIO.when(simEvent.time < now)(ZIO.die(TimeInThePast(now, simEvent.time)))
       number <- counter.updateAndGet(_ + 1)
-      _ <- eventQueue.update { queue =>
+      _ <- eventQueueRef.update { queue =>
         queue + EventContainer(number, simEvent)
       }
       _ <- ZIO.when(now.isNaN || simEvent.time < now + parallelismWindow) {
@@ -88,13 +88,13 @@ class SimulationSchedulerImpl[T]( //todo move type parameter to schedule method
   override def holdUntil(time: Double): UIO[HoldFinished] =
     for {
       myFiberDescriptor <- ZIO.descriptor
-      _ <- processedSet.update { beingProcessed =>
+      _ <- beingProcessedRef.update { beingProcessed =>
         //todo O(1)
         val maybeMyContainer = beingProcessed.find(container => container.fiber.id.id == myFiberDescriptor.id.id)
         maybeMyContainer.fold(beingProcessed)(beingProcessed - _)
       }
       p <- Promise.make[Nothing, Unit]
-      _ <- schedule(SimEvent(time, Holder(p).asInstanceOf[T]) {
+      _ <- schedule(SimEvent(time, Holder(p)) {
         case SimEvent(_, Holder(promise)) => promise.succeed(()).unit
       })
       _ <- p.await
@@ -102,22 +102,21 @@ class SimulationSchedulerImpl[T]( //todo move type parameter to schedule method
 
 
   def startScheduling(): UIO[Unit] =
-    processedSet.update(_ - SimulationScheduler.zeroEvent())
+    beingProcessedRef.update(_ - SimulationScheduler.zeroEvent())
       *> processEvents()
 
 
-  private def getTimeOfFirstEvent(events: Set[EventContainer[T]], default: => Double) =
+  private def getTimeOfFirstEvent(events: Set[EventContainer], default: => Double) =
     events.headOption.fold(default)(_.event.time)
 
   private def processEvents(): UIO[Unit] =
     for {
-      beingProcessed <- processedSet.get
-      q <- eventQueue.get
-      _ <- Console.printLine(s"beingProcessed = $beingProcessed, q = $q")
-        .fold((_: IOException) => throw new RuntimeException(), identity)
-      eventsToProcess <- eventQueue.modify { queue =>
+      beingProcessed <- beingProcessedRef.get
+      q <- eventQueueRef.get
+      _ <- Console.printLine(s"beingProcessed = $beingProcessed, q = $q").orElse(ZIO.unit)
+      eventsToProcess <- eventQueueRef.modify { queue =>
         val now = getTimeOfFirstEvent(beingProcessed, getTimeOfFirstEvent(queue, 0))
-        val separator = EventContainer[T](0, SimEvent(now + parallelismWindow, null.asInstanceOf[T]))
+        val separator = EventContainer(0, SimEvent(now + parallelismWindow, null))
         val toBeProcessed = queue.rangeUntil(separator)
         val futureEvents = queue.rangeFrom(separator)
         (toBeProcessed, futureEvents)
@@ -125,18 +124,17 @@ class SimulationSchedulerImpl[T]( //todo move type parameter to schedule method
       toProcessWithFibers <- ZIO.foreach(eventsToProcess)(container => process(container).fork
         .map(fiber => container.copy(fiber = fiber))
       )
-      _ <- ZIO.when(toProcessWithFibers.nonEmpty)(processedSet.update(_ ++ toProcessWithFibers))
+      _ <- ZIO.when(toProcessWithFibers.nonEmpty)(beingProcessedRef.update(_ ++ toProcessWithFibers))
       _ <- ZIO.foreach(toProcessWithFibers)(container => container.fiber.join)
     } yield ()
 
-  private def process(eventContainer: EventContainer[T]): UIO[Unit] = {
+  private def process(eventContainer: EventContainer): UIO[Unit] = {
     for {
-      _ <- Console.printLine(eventContainer.event)
-        .fold(e => throw new RuntimeException("shouldn't happen", e), identity)
+      _ <- Console.printLine(eventContainer.event).orElse(ZIO.unit)
       //      _ <- ZIO.sleep(zio.Duration.fromMillis(300))
       _ <- eventContainer.event.handle()
       //todo probably keep now as double directly, and beingProcessed is to be just a Set
-      shouldContinue <- processedSet.modify { beingProcessed =>
+      shouldContinue <- beingProcessedRef.modify { beingProcessed =>
         val newBeingProcessed = beingProcessed - eventContainer
         val shouldContinue = newBeingProcessed.isEmpty || newBeingProcessed.head.event.time > eventContainer.event.time
         shouldContinue -> newBeingProcessed
@@ -147,7 +145,7 @@ class SimulationSchedulerImpl[T]( //todo move type parameter to schedule method
 
 
 object SimulationSchedulerImpl:
-  case class EventContainer[T](eventNumber: Long, event: SimEvent[T], fiber: Fiber.Runtime[Nothing, Unit] = null)
+  case class EventContainer(eventNumber: Long, event: SimEvent[_], fiber: Fiber.Runtime[Nothing, Unit] = null)
 
-  given containerOrdering[T]: Ordering[EventContainer[T]] =
+  given containerOrdering[T]: Ordering[EventContainer] =
     Ordering.by(container => container.event.time -> container.eventNumber)

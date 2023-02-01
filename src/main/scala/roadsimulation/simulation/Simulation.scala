@@ -13,7 +13,7 @@ object Simulation {
 
   def simulate(scenario: Scenario): IO[AnyRef, Unit] =
     for {
-      scheduler <- SimulationScheduler.make[RoadEventType]()
+      scheduler <- SimulationScheduler.make()
       fillingStationHandler <- FillingStationHandler.make(scenario, scheduler)
       vehicleHandler = new VehicleHandlerImpl(scenario, scheduler, fillingStationHandler)
       initialEvents <- vehicleHandler.initialEvents(scenario)

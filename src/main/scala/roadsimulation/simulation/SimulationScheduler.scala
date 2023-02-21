@@ -41,8 +41,8 @@ object SimulationScheduler:
 
   case class TimeInThePast(
     now: Double,
-    scheduleTime: Double
-  ) extends Exception(s"Time in the past: $scheduleTime, now is $now")
+    event: SimEvent[_],
+  ) extends Exception(s"Time in the past: ${event.time}, now is $now, eventType = ${event.eventType}")
 
   enum HoldStatus:
     case ItsTime, Interrupted
@@ -68,35 +68,41 @@ class SimulationSchedulerImpl(
 ) extends SimulationScheduler:
 
   override def schedule[T](simEvent: SimEvent[T]): UIO[Unit] =
-  // just put the event in the queue
     for {
       beingProcessed <- beingProcessedRef.get
       now = getTimeOfFirstEvent(beingProcessed, Double.NaN)
-      _ <- ZIO.when(simEvent.time < now)(ZIO.die(TimeInThePast(now, simEvent.time)))
+      _ <- ZIO.when(simEvent.time < now)(ZIO.die(TimeInThePast(now, simEvent)))
       number <- counter.updateAndGet(_ + 1)
-      _ <- eventQueueRef.update { queue =>
-        queue + EventContainer(number, simEvent)
-      }
-      _ <- ZIO.when(now.isNaN || simEvent.time < now + parallelismWindow) {
-        processEvents()
+      eventContainer = EventContainer(number, simEvent)
+      _ <- ZIO.when(now.isNaN){Console.printLine(s"now is nan: $simEvent").orDie}
+      shouldBeProcessed = now.isNaN || simEvent.time < now + parallelismWindow
+      _ <- if (shouldBeProcessed) {
+        process(eventContainer).fork.flatMap { fiber =>
+          val container = eventContainer.copy(fiber = fiber)
+          beingProcessedRef.update(_ + container) *> container.fiber.join
+        }
+      } else {
+        eventQueueRef.update { queue => queue + eventContainer }
       }
     } yield ()
 
 
-  case class Holder(promise: Promise[Nothing, Unit])
-
   override def holdUntil(time: Double): UIO[HoldFinished] =
     for {
       myFiberDescriptor <- ZIO.descriptor
-      _ <- beingProcessedRef.update { beingProcessed =>
-        //todo O(1)
-        val maybeMyContainer = beingProcessed.find(container => container.fiber.id.id == myFiberDescriptor.id.id)
-        maybeMyContainer.fold(beingProcessed)(beingProcessed - _)
-      }
-      p <- Promise.make[Nothing, Unit]
-      _ <- schedule(SimEvent(time, Holder(p)) {
-        case SimEvent(_, Holder(promise)) => promise.succeed(()).unit
+      beingProcessed <- beingProcessedRef.get
+      myContainer = beingProcessed
+        .find(container => container.fiber.id.id == myFiberDescriptor.id.id)
+        .get //todo O(1)
+      updatedEvent = myContainer.event.copy(time = time)(NoHandler)
+      containerWithUpdatedTime = myContainer.copy(event = updatedEvent)
+      p <- Promise.make[Nothing, Unit] //todo maybe Semaphore ?
+      _ <- schedule(SimEvent(time, ()) { case _ =>
+        //put the fiber container back to beingProcessed
+        beingProcessedRef.update(_ + containerWithUpdatedTime)
+        p.succeed(()).unit
       })
+      _ <- beingProcessedRef.update(_ - myContainer)
       _ <- p.await
     } yield HoldFinished(time, SimulationScheduler.HoldStatus.ItsTime)
 
@@ -113,7 +119,7 @@ class SimulationSchedulerImpl(
     for {
       beingProcessed <- beingProcessedRef.get
       q <- eventQueueRef.get
-      _ <- Console.printLine(s"beingProcessed = $beingProcessed, q = $q").orElse(ZIO.unit)
+      _ <- Console.printLine(s"beingProcessed = $beingProcessed, q = $q").orDie
       eventsToProcess <- eventQueueRef.modify { queue =>
         val now = getTimeOfFirstEvent(beingProcessed, getTimeOfFirstEvent(queue, 0))
         val separator = EventContainer(0, SimEvent(now + parallelismWindow, null))
@@ -130,14 +136,24 @@ class SimulationSchedulerImpl(
 
   private def process(eventContainer: EventContainer): UIO[Unit] = {
     for {
-      _ <- Console.printLine(eventContainer.event).orElse(ZIO.unit)
+      _ <- Console.printLine(eventContainer.event).orDie
       //      _ <- ZIO.sleep(zio.Duration.fromMillis(300))
       _ <- eventContainer.event.handle()
-      //todo probably keep now as double directly, and beingProcessed is to be just a Set
       shouldContinue <- beingProcessedRef.modify { beingProcessed =>
-        val newBeingProcessed = beingProcessed - eventContainer
-        val shouldContinue = newBeingProcessed.isEmpty || newBeingProcessed.head.event.time > eventContainer.event.time
-        shouldContinue -> newBeingProcessed
+        val beingProcessed2 = beingProcessed - eventContainer
+        val (beingProcessed3, actualContainer) = if (beingProcessed2.size == beingProcessed.size) {
+          val x = beingProcessed.find(_.eventNumber == eventContainer.eventNumber)
+          if (x.isEmpty) {
+            println(s"x empty $eventContainer, bp = $beingProcessed")
+          }
+          // means nothing was removed, probably time is changed during holdUntil
+          val actualContainer = x.get //todo O(1)
+          (beingProcessed - actualContainer, actualContainer)
+        } else {
+          (beingProcessed2, eventContainer)
+        }
+        val shouldContinue = beingProcessed3.isEmpty || beingProcessed3.head.event.time > actualContainer.event.time
+        shouldContinue -> beingProcessed3
       }
       _ <- ZIO.when(shouldContinue)(processEvents())
     } yield ()
@@ -147,5 +163,5 @@ class SimulationSchedulerImpl(
 object SimulationSchedulerImpl:
   case class EventContainer(eventNumber: Long, event: SimEvent[_], fiber: Fiber.Runtime[Nothing, Unit] = null)
 
-  given containerOrdering[T]: Ordering[EventContainer] =
+  given containerOrdering: Ordering[EventContainer] =
     Ordering.by(container => container.event.time -> container.eventNumber)

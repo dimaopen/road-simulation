@@ -36,10 +36,10 @@ object Scenario {
       _ <- ZIO.when(desiredTypes.isEmpty) {
         ZIO.fail(new IllegalArgumentException("No desired vehicle types presented"))
       }
-      tripPlans <- generateTripPlans(20,
+      tripPlans <- generateTripPlans(9000,
         NonEmptyChunk(desiredTypes.head, desiredTypes.tail: _*),
         4 * 3600,
-        4 * 3600 + 2,
+        8 * 3600 + 2,
         777)
     } yield Scenario(600_000.0, 100, 86400 * 2, fillingStations, tripPlans)
   }

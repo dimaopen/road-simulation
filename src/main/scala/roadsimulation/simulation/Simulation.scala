@@ -11,15 +11,17 @@ import java.util.concurrent.PriorityBlockingQueue
  */
 object Simulation {
 
-  def simulate(scenario: Scenario): IO[AnyRef, Unit] =
-    for {
-      scheduler <- SimulationScheduler.make()
-      fillingStationHandler <- FillingStationHandler.make(scenario, scheduler)
-      vehicleHandler = new VehicleHandlerImpl(scenario, scheduler, fillingStationHandler)
-      initialEvents <- vehicleHandler.initialEvents(scenario)
-      _ <- ZIO.foreach(initialEvents)(event => scheduler.schedule(event))
-      _ <- scheduler.startScheduling()
-    } yield ()
+  def simulate(scenario: Scenario): UIO[Unit] =
+    ZIO.scoped {
+      for {
+        scheduler <- SimulationScheduler.make()
+        fillingStationHandler <- FillingStationHandler.make(scenario, scheduler)
+        vehicleHandler = new VehicleHandlerImpl(scenario, scheduler, fillingStationHandler)
+        initialEvents <- vehicleHandler.initialEvents(scenario)
+        _ <- ZIO.foreach(initialEvents)(event => scheduler.schedule(event))
+        _ <- scheduler.startScheduling()
+        _ <- ZIO.sleep(10.seconds)
+      } yield ()
 
-
+    }
 }

@@ -101,5 +101,5 @@ class FillingStationObject(
     val ttf = timeToFill(vehicle)
     val fuelDiff = vehicle.vehicleType.fuelCapacityInJoule - vehicle.fuelLevelInJoule
     vehicle.vehicleType.fuelType match
-      case Gasoline | Diesel => if (ttf < fuelingTime) 0 else fuelDiff
+      case Gasoline | Diesel => if (ttf > fuelingTime) 0 else fuelDiff
       case Propane | Methane | Electricity => math.min(1.0, fuelingTime / ttf) * fuelDiff

@@ -32,7 +32,7 @@ class VehicleHandlerImpl(
     val currentPosition = vehicle.positionInM
     if (currentPosition >= scenario.roadLengthInM)
     // we reached the destination, end up here
-      return ZIO.unit
+      return zio.Console.printLine(s"${vehicle.id} is finished").orDie //todo replace with the EndTravel event
     val nextPosition = calculatePositionToStartSearchingForFuelStation(vehicle,
       scenario.tripPlans(vehicle.id).startSearchingForFillingStationThresholdInM)
     if (nextPosition <= currentPosition)
@@ -60,11 +60,11 @@ class VehicleHandlerImpl(
         val vehicle = event.eventType.vehicle
         for {
           exit <- fillingStationObject.enter(vehicle, event.time)
-          _ <- handleContinueTraveling(SimEvent(exit.time, VehicleContinueTraveling(exit.vehicle, true)))
+          _ <- handleContinueTraveling(SimEvent(exit.time, VehicleContinueTraveling(exit.vehicle, entersRoad = true)))
         } yield ()
       case None =>
         val vehicle = event.eventType.vehicle
-        handleContinueTraveling(SimEvent(event.time, VehicleContinueTraveling(vehicle, false)))
+        handleContinueTraveling(SimEvent(event.time, VehicleContinueTraveling(vehicle, entersRoad = false)))
   }
 
   private def goToPositionWithObject(

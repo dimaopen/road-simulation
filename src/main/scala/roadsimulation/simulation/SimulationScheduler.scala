@@ -1,12 +1,12 @@
 package roadsimulation.simulation
 
-import roadsimulation.simulation.SimulationScheduler.{EventHandler, HoldFinished, NoHandler, SimEvent, TimeInThePast}
-import roadsimulation.simulation.SimulationSchedulerImpl.EventContainer
+import roadsimulation.simulation.SimulationScheduler.{EventHandler, HoldFinished, NoHandler, SimEvent, TimeInThePast, zeroEventKey}
+import roadsimulation.simulation.SimulationSchedulerImpl.EventKey
 import zio.{Console, Fiber, FiberRef, IO, Promise, Ref, Scope, UIO, URIO, ZIO}
 
 import java.io.IOException
 import java.time.Duration
-import java.util.concurrent.PriorityBlockingQueue
+import java.util.concurrent.{ConcurrentNavigableMap, ConcurrentSkipListMap, PriorityBlockingQueue}
 import scala.collection.immutable.SortedSet
 
 
@@ -47,110 +47,122 @@ object SimulationScheduler:
   enum HoldExitStatus:
     case ItsTime, Interrupted
 
-  def make(): URIO[Scope, SimulationSchedulerImpl] =
+  def make(parallelismWindow: Double, endSimulationTime: Double): URIO[Scope, SimulationSchedulerImpl] =
     for {
-      currentEvent <- FiberRef.make(null.asInstanceOf[EventContainer])
-      counter <- Ref.make(1L)
+      currentEvent <- FiberRef.make(null.asInstanceOf[EventKey])
+      counter <- Ref.make(0L)
+      promise <- Promise.make[Nothing, Unit]
       //we put an event that prevents scheduler from get running
-      processedSet <- Ref.make(SortedSet(zeroEvent()))
-      eventQueue <- Ref.make(SortedSet.empty[EventContainer])
-    } yield new SimulationSchedulerImpl(counter, processedSet, eventQueue, currentEvent, 30.0)
+    } yield new SimulationSchedulerImpl(counter,
+      new ConcurrentSkipListMap(java.util.Collections.singletonMap(zeroEventKey(), ())),
+      new ConcurrentSkipListMap(),
+      currentEvent,
+      promise,
+      parallelismWindow,
+      endSimulationTime)
 
-  private[simulation] def zeroEvent() = EventContainer(0, SimEvent(Double.NegativeInfinity, null))
+  private[simulation] def zeroEventKey() = EventKey(0, Double.NegativeInfinity)
 
 class SimulationSchedulerImpl(
   // event counter to separate events of the same time
   counter: Ref[Long],
-  // events that is being processed
-  beingProcessedRef: Ref[SortedSet[EventContainer]],
+  // events that is being processed (using a Map as a Set, hence Any as a value type)
+  beingProcessed: ConcurrentNavigableMap[EventKey, Any],
   // queued events
-  eventQueueRef: Ref[SortedSet[EventContainer]],
-  currentEventRef: FiberRef[EventContainer],
-  parallelismWindow: Double
+  eventQueue: ConcurrentNavigableMap[EventKey, SimEvent[_]],
+  currentEventRef: FiberRef[EventKey],
+  endPromise: Promise[Nothing, Unit],
+  parallelismWindow: Double,
+  endSimulationTime: Double,
 ) extends SimulationScheduler:
 
   override def schedule[T](simEvent: SimEvent[T]): UIO[Unit] =
-    for {
-      beingProcessed <- beingProcessedRef.get
-      now = getTimeOfFirstEvent(beingProcessed, Double.NaN)
+    if (simEvent.time > endSimulationTime)
+      Console.printLine("Outside of simulation end time: " + simEvent).orDie
+    else for {
+      now <- ZIO.succeed(beingProcessed.firstKey().eventTime)
       _ <- ZIO.when(simEvent.time < now)(ZIO.die(TimeInThePast(now, simEvent)))
       number <- counter.updateAndGet(_ + 1)
-      eventContainer = EventContainer(number, simEvent)
-      shouldBeProcessed = now.isNaN || simEvent.time < now + parallelismWindow
+      eventKey = EventKey(number, simEvent.time)
+      shouldBeProcessed = simEvent.time < now + parallelismWindow
       _ <- if (shouldBeProcessed) {
-        beingProcessedRef.update(_ + eventContainer) *> process(eventContainer).forkDaemon
+        process(eventKey, simEvent).forkDaemon
       } else {
-        eventQueueRef.update { queue => queue + eventContainer }
+        ZIO.succeed(eventQueue.put(eventKey, simEvent))
       }
     } yield ()
 
 
   override def holdUntil(time: Double): UIO[HoldFinished] =
     for {
-      myEventContainer <- currentEventRef.get
-//      _ <- Console.printLine(s"myEventContainer = $myEventContainer").orDie
-      updatedEvent = myEventContainer.event.copy(time = time)(NoHandler)
-      containerWithUpdatedTime = myEventContainer.copy(event = updatedEvent)
-      _ <- currentEventRef.set(containerWithUpdatedTime)
+      myEventKey <- currentEventRef.get
+      updatedEventKey = myEventKey.copy(eventTime = time)
+      _ <- currentEventRef.set(updatedEventKey)
       p <- Promise.make[Nothing, Unit] //todo maybe Semaphore ?
       _ <- schedule(SimEvent(time, ()) { case _ =>
-        // when it's time we put the fiber container back to beingProcessed
-        beingProcessedRef.update(_ + containerWithUpdatedTime) *>
-        p.succeed(()).unit
+        // when it's time we put the event back to beingProcessed
+        ZIO.succeed(beingProcessed.put(updatedEventKey, ())) *>
+          p.succeed(()).unit
       })
-      _ <- removeContainerAndContinue(myEventContainer)
+      _ <- removeEventAndContinue(myEventKey)
       _ <- p.await
     } yield HoldFinished(time, SimulationScheduler.HoldExitStatus.ItsTime)
 
 
   def startScheduling(): UIO[Unit] =
-    beingProcessedRef.update(_ - SimulationScheduler.zeroEvent())
-      *> processEvents()
-
-
-  private def getTimeOfFirstEvent(events: Set[EventContainer], default: => Double) =
-    events.headOption.fold(default)(_.event.time)
+    for {
+      _ <- ZIO.succeed(beingProcessed.remove(zeroEventKey()))
+      _ <- processEvents()
+      _ <- endPromise.await
+    } yield ()
 
   private def processEvents(): UIO[Unit] =
+    import scala.jdk.CollectionConverters._
     for {
-      beingProcessed <- beingProcessedRef.get
-//      q <- eventQueueRef.get
-//      _ <- Console.printLine(s"beingProcessed = $beingProcessed, q = $q").orDie
-      eventsToProcess <- eventQueueRef.modify { queue =>
-        val now = getTimeOfFirstEvent(beingProcessed, getTimeOfFirstEvent(queue, 0))
-        val separator = EventContainer(0, SimEvent(now + parallelismWindow, null))
-        val toBeProcessed = queue.rangeUntil(separator)
-        val futureEvents = queue.rangeFrom(separator)
-        (toBeProcessed, futureEvents)
+      nextEventEntry <- ZIO.succeed(beingProcessed.firstEntry())
+      now <- if (nextEventEntry != null) ZIO.succeed(nextEventEntry.getKey.eventTime)
+      else ZIO.succeed {
+        val firstQueuedEventEntry = eventQueue.firstEntry()
+        if (firstQueuedEventEntry != null) firstQueuedEventEntry.getKey.eventTime else Double.NaN
       }
-      _ <- ZIO.when(eventsToProcess.nonEmpty)(beingProcessedRef.update(_ ++ eventsToProcess))
-      _ <- ZIO.foreach(eventsToProcess)(eventContainer => process(eventContainer).forkDaemon)
+      _ <- ZIO.when(now.isNaN)(endPromise.succeed(()))
+      eventsToProcess <- ZIO.succeed {
+        import scala.jdk.CollectionConverters._
+        val events = eventQueue.headMap(EventKey(0, now + parallelismWindow))
+        val keys = events.keySet().asScala
+        keys.foldLeft(IndexedSeq.empty[(EventKey, SimEvent[_])]) { case (acc, key) =>
+          val event = events.remove(key)
+          if (event == null) acc
+          else acc :+ (key, event)
+        }
+      }
+      _ <- ZIO.foreach(eventsToProcess) { case (eventKey, event) => process(eventKey, event).forkDaemon }
     } yield ()
 
-  private def process(eventContainer: EventContainer): UIO[Unit] =
+  private def process(eventKey: EventKey, event: SimEvent[_]): UIO[Unit] =
     for {
-      _ <- currentEventRef.set(eventContainer)
-      _ <- Console.printLine(eventContainer.event).orDie
+      _ <- currentEventRef.set(eventKey)
+      _ <- ZIO.succeed(beingProcessed.put(eventKey, ()))
+      _ <- Console.printLine(event).orDie
       //      _ <- ZIO.sleep(zio.Duration.fromMillis(300))
-      _ <- eventContainer.event.handle()
-      actualContainer <- currentEventRef.get
-      _ <- removeContainerAndContinue(actualContainer)
+      _ <- event.handle()
+      actualKey <- currentEventRef.get
+      _ <- removeEventAndContinue(actualKey)
     } yield ()
 
-  private def removeContainerAndContinue(container: EventContainer): UIO[Unit] =
+  private def removeEventAndContinue(eventKey: EventKey): UIO[Unit] =
     for {
-      shouldContinue <- beingProcessedRef.modify { beingProcessed =>
-        val newBeingProcessed = beingProcessed - container
-        val shouldContinue = newBeingProcessed
-          .isEmpty // || newBeingProcessed.head.event.time > container.event.time //FIXME race condition?
-        shouldContinue -> newBeingProcessed
-      }
+      oldestEventKey <- ZIO.succeed(beingProcessed.firstKey())
+      shouldContinue = oldestEventKey == eventKey
+      _ <- ZIO.succeed(beingProcessed.remove(eventKey))
       _ <- ZIO.when(shouldContinue)(processEvents())
     } yield ()
 
 
 object SimulationSchedulerImpl:
-  case class EventContainer(eventNumber: Long, event: SimEvent[_])
-
-  given containerOrdering: Ordering[EventContainer] =
-    Ordering.by(container => container.event.time -> container.eventNumber)
+  case class EventKey(eventNumber: Long, eventTime: Double) extends Comparable[EventKey] {
+    override def compareTo(other: EventKey): Int = {
+      val timeComp = java.lang.Double.compare(this.eventTime, other.eventTime)
+      if (timeComp != 0) timeComp else java.lang.Long.compare(this.eventNumber, other.eventNumber)
+    }
+  }

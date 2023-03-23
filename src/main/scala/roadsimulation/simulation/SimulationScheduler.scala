@@ -47,14 +47,21 @@ object SimulationScheduler:
   enum HoldExitStatus:
     case ItsTime, Interrupted
 
-  def make(): URIO[Scope, SimulationSchedulerImpl] =
+  def make(parallelismWindow: Double, endSimulationTime: Double): URIO[Scope, SimulationSchedulerImpl] =
     for {
       currentEvent <- FiberRef.make(null.asInstanceOf[EventContainer])
       counter <- Ref.make(1L)
       //we put an event that prevents scheduler from get running
       processedSet <- Ref.make(SortedSet(zeroEvent()))
       eventQueue <- Ref.make(SortedSet.empty[EventContainer])
-    } yield new SimulationSchedulerImpl(counter, processedSet, eventQueue, currentEvent, 30.0)
+      promise <- Promise.make[Nothing, Unit]
+    } yield new SimulationSchedulerImpl(counter,
+      processedSet,
+      eventQueue,
+      currentEvent,
+      promise,
+      parallelismWindow,
+      endSimulationTime)
 
   private[simulation] def zeroEvent() = EventContainer(0, SimEvent(Double.NegativeInfinity, null))
 
@@ -66,11 +73,15 @@ class SimulationSchedulerImpl(
   // queued events
   eventQueueRef: Ref[SortedSet[EventContainer]],
   currentEventRef: FiberRef[EventContainer],
-  parallelismWindow: Double
+  endPromise: Promise[Nothing, Unit],
+  parallelismWindow: Double,
+  endSimulationTime: Double,
 ) extends SimulationScheduler:
 
   override def schedule[T](simEvent: SimEvent[T]): UIO[Unit] =
-    for {
+    if (simEvent.time > endSimulationTime)
+      Console.printLine("Outside of simulation end time: " + simEvent).orDie
+    else for {
       beingProcessed <- beingProcessedRef.get
       now = getTimeOfFirstEvent(beingProcessed, Double.NaN)
       _ <- ZIO.when(simEvent.time < now)(ZIO.die(TimeInThePast(now, simEvent)))
@@ -88,7 +99,7 @@ class SimulationSchedulerImpl(
   override def holdUntil(time: Double): UIO[HoldFinished] =
     for {
       myEventContainer <- currentEventRef.get
-//      _ <- Console.printLine(s"myEventContainer = $myEventContainer").orDie
+      //      _ <- Console.printLine(s"myEventContainer = $myEventContainer").orDie
       updatedEvent = myEventContainer.event.copy(time = time)(NoHandler)
       containerWithUpdatedTime = myEventContainer.copy(event = updatedEvent)
       _ <- currentEventRef.set(containerWithUpdatedTime)
@@ -96,7 +107,7 @@ class SimulationSchedulerImpl(
       _ <- schedule(SimEvent(time, ()) { case _ =>
         // when it's time we put the fiber container back to beingProcessed
         beingProcessedRef.update(_ + containerWithUpdatedTime) *>
-        p.succeed(()).unit
+          p.succeed(()).unit
       })
       _ <- removeContainerAndContinue(myEventContainer)
       _ <- p.await
@@ -104,8 +115,11 @@ class SimulationSchedulerImpl(
 
 
   def startScheduling(): UIO[Unit] =
-    beingProcessedRef.update(_ - SimulationScheduler.zeroEvent())
-      *> processEvents()
+    for {
+      _ <- beingProcessedRef.update(_ - SimulationScheduler.zeroEvent())
+      _ <- processEvents()
+      _ <- endPromise.await
+    } yield ()
 
 
   private def getTimeOfFirstEvent(events: Set[EventContainer], default: => Double) =
@@ -114,23 +128,24 @@ class SimulationSchedulerImpl(
   private def processEvents(): UIO[Unit] =
     for {
       beingProcessed <- beingProcessedRef.get
-//      q <- eventQueueRef.get
-//      _ <- Console.printLine(s"beingProcessed = $beingProcessed, q = $q").orDie
-      eventsToProcess <- eventQueueRef.modify { queue =>
+      //      q <- eventQueueRef.get
+      //      _ <- Console.printLine(s"beingProcessed = $beingProcessed, q = $q").orDie
+      eventsToProcessAndNow <- eventQueueRef.modify { queue =>
         val now = getTimeOfFirstEvent(beingProcessed, getTimeOfFirstEvent(queue, Double.NaN))
         val separator = EventContainer(0, SimEvent(now + parallelismWindow, null))
         val toBeProcessed = queue.rangeUntil(separator)
         val futureEvents = queue.rangeFrom(separator)
-        (toBeProcessed, futureEvents)
+        ((toBeProcessed, now), futureEvents)
       }
-      _ <- ZIO.foreach(eventsToProcess)(eventContainer => process(eventContainer).forkDaemon)
+      _ <- ZIO.when(eventsToProcessAndNow._2.isNaN)(endPromise.succeed(()))
+      _ <- ZIO.foreach(eventsToProcessAndNow._1)(eventContainer => process(eventContainer).forkDaemon)
     } yield ()
 
   private def process(eventContainer: EventContainer): UIO[Unit] =
     for {
       _ <- currentEventRef.set(eventContainer)
       _ <- beingProcessedRef.update(_ + eventContainer)
-//      _ <- Console.printLine(eventContainer.event).orDie
+      //      _ <- Console.printLine(eventContainer.event).orDie
       //      _ <- ZIO.sleep(zio.Duration.fromMillis(300))
       _ <- eventContainer.event.handle()
       actualContainer <- currentEventRef.get

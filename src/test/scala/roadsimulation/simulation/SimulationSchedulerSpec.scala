@@ -15,7 +15,7 @@ class SimulationSchedulerSpec extends JUnitRunnableSpec {
   def spec = suite("SimulationSchedulerSpec")(
     test("simulation happens correctly") {
       for {
-        scheduler <- SimulationScheduler.make()
+        scheduler <- SimulationScheduler.make(30, Double.PositiveInfinity)
         scenario = scenarioWithOneCar()
         fillingStationHandler <- FillingStationHandler.make(scenario, scheduler)
         vehicleHandler = new VehicleHandlerImpl(scenario, scheduler, fillingStationHandler)

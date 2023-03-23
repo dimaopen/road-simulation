@@ -78,7 +78,7 @@ class SimulationSchedulerImpl(
       eventContainer = EventContainer(number, simEvent)
       shouldBeProcessed = now.isNaN || simEvent.time < now + parallelismWindow
       _ <- if (shouldBeProcessed) {
-        beingProcessedRef.update(_ + eventContainer) *> process(eventContainer).forkDaemon
+        process(eventContainer).forkDaemon
       } else {
         eventQueueRef.update { queue => queue + eventContainer }
       }
@@ -123,13 +123,13 @@ class SimulationSchedulerImpl(
         val futureEvents = queue.rangeFrom(separator)
         (toBeProcessed, futureEvents)
       }
-      _ <- ZIO.when(eventsToProcess.nonEmpty)(beingProcessedRef.update(_ ++ eventsToProcess))
       _ <- ZIO.foreach(eventsToProcess)(eventContainer => process(eventContainer).forkDaemon)
     } yield ()
 
   private def process(eventContainer: EventContainer): UIO[Unit] =
     for {
       _ <- currentEventRef.set(eventContainer)
+      _ <- beingProcessedRef.update(_ + eventContainer)
 //      _ <- Console.printLine(eventContainer.event).orDie
       //      _ <- ZIO.sleep(zio.Duration.fromMillis(300))
       _ <- eventContainer.event.handle()

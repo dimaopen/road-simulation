@@ -117,7 +117,7 @@ class SimulationSchedulerImpl(
 //      q <- eventQueueRef.get
 //      _ <- Console.printLine(s"beingProcessed = $beingProcessed, q = $q").orDie
       eventsToProcess <- eventQueueRef.modify { queue =>
-        val now = getTimeOfFirstEvent(beingProcessed, getTimeOfFirstEvent(queue, 0))
+        val now = getTimeOfFirstEvent(beingProcessed, getTimeOfFirstEvent(queue, Double.NaN))
         val separator = EventContainer(0, SimEvent(now + parallelismWindow, null))
         val toBeProcessed = queue.rangeUntil(separator)
         val futureEvents = queue.rangeFrom(separator)
@@ -130,7 +130,7 @@ class SimulationSchedulerImpl(
   private def process(eventContainer: EventContainer): UIO[Unit] =
     for {
       _ <- currentEventRef.set(eventContainer)
-      _ <- Console.printLine(eventContainer.event).orDie
+//      _ <- Console.printLine(eventContainer.event).orDie
       //      _ <- ZIO.sleep(zio.Duration.fromMillis(300))
       _ <- eventContainer.event.handle()
       actualContainer <- currentEventRef.get
@@ -140,9 +140,9 @@ class SimulationSchedulerImpl(
   private def removeContainerAndContinue(container: EventContainer): UIO[Unit] =
     for {
       shouldContinue <- beingProcessedRef.modify { beingProcessed =>
+        val theOldest = beingProcessed.head
         val newBeingProcessed = beingProcessed - container
-        val shouldContinue = newBeingProcessed
-          .isEmpty // || newBeingProcessed.head.event.time > container.event.time //FIXME race condition?
+        val shouldContinue = theOldest == container
         shouldContinue -> newBeingProcessed
       }
       _ <- ZIO.when(shouldContinue)(processEvents())

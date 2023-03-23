@@ -77,7 +77,8 @@ class VehicleHandlerImpl(
     val distanceToTravel = positionInM - vehicle.positionInM
     val nextEvent = if (vehicle.remainingRange < distanceToTravel)
       SimEvent(currentTime + vehicle.remainingRange / averageSpeedInMPerS,
-        RunOutOfGas(vehicle.drive(vehicle.remainingRange)))
+        RunOutOfGas(vehicle.drive(vehicle.remainingRange)))(roogEvent =>
+        zio.Console.printLine(roogEvent.eventType.vehicle.id.toString() + " is finished with ROOG").orDie)
     else
       SimEvent(currentTime + distanceToTravel / averageSpeedInMPerS,
         VehicleAtPosition(vehicle.drive(distanceToTravel), obj))(handleVehicleAtPosition)
@@ -92,7 +93,7 @@ class VehicleHandlerImpl(
       vehicle.positionInM
     else
       val travelDistance = vehicle.remainingRange - startSearchingForFillingStationThresholdInM
-      vehicle.positionInM + travelDistance
+      vehicle.positionInM + travelDistance + 0.001
 
 
 

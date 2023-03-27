@@ -17,8 +17,7 @@ object Simulation {
         scheduler <- SimulationScheduler.make(30, Double.PositiveInfinity)
         fillingStationHandler <- FillingStationHandler.make(scenario, scheduler)
         vehicleHandler = new VehicleHandlerImpl(scenario, scheduler, fillingStationHandler)
-        initialEvents <- vehicleHandler.initialEvents(scenario)
-        _ <- ZIO.foreach(initialEvents)(event => scheduler.schedule(event))
+        _ <- vehicleHandler.scheduleInitialEvents(scenario)
         _ <- scheduler.startScheduling()
       } yield ()
 

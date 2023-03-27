@@ -65,7 +65,7 @@ object Scenario {
       searchStationThreshold
     )
 
-    Random.setSeed(seed) *> ZIO.foreach(1 to n)(createTripPlan).map(_.groupMapReduce(_.id)(identity)((a, _) => a))
+    Random.setSeed(seed) *> ZIO.foreachPar(1 to n)(createTripPlan).map(_.groupMapReduce(_.id)(identity)((a, _) => a))
 
 
   }

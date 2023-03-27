@@ -101,7 +101,8 @@ class SimulationSchedulerImpl(
       myEventContainer <- currentEventRef.get
       //      _ <- Console.printLine(s"myEventContainer = $myEventContainer").orDie
       updatedEvent = myEventContainer.event.copy(time = time)(NoHandler)
-      containerWithUpdatedTime = myEventContainer.copy(event = updatedEvent)
+      newNumber <- counter.updateAndGet(_ + 1)
+      containerWithUpdatedTime = myEventContainer.copy(eventNumber = newNumber, event = updatedEvent)
       _ <- currentEventRef.set(containerWithUpdatedTime)
       p <- Promise.make[Nothing, Unit] //todo maybe Semaphore ?
       _ <- schedule(SimEvent(time, ()) { case _ =>
@@ -128,8 +129,8 @@ class SimulationSchedulerImpl(
   private def processEvents(): UIO[Unit] =
     for {
       beingProcessed <- beingProcessedRef.get
-      //      q <- eventQueueRef.get
-      //      _ <- Console.printLine(s"beingProcessed = $beingProcessed, q = $q").orDie
+//      q <- eventQueueRef.get
+//      _ <- Console.printLine(s"beingProcessed = $beingProcessed, q = $q").orDie
       eventsToProcessAndNow <- eventQueueRef.modify { queue =>
         val now = getTimeOfFirstEvent(beingProcessed, getTimeOfFirstEvent(queue, Double.NaN))
         val separator = EventContainer(0, SimEvent(now + parallelismWindow, null))
@@ -145,7 +146,7 @@ class SimulationSchedulerImpl(
     for {
       _ <- currentEventRef.set(eventContainer)
       _ <- beingProcessedRef.update(_ + eventContainer)
-      //      _ <- Console.printLine(eventContainer.event).orDie
+//      _ <- Console.printLine(eventContainer.event).orDie
       //      _ <- ZIO.sleep(zio.Duration.fromMillis(300))
       _ <- eventContainer.event.handle()
       actualContainer <- currentEventRef.get

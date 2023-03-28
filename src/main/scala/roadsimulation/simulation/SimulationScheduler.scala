@@ -155,12 +155,12 @@ class SimulationSchedulerImpl(
 
   private def removeContainerAndContinue(container: EventContainer): UIO[Unit] =
     for {
-      shouldContinue <- beingProcessedRef.modify { beingProcessed =>
+      theOldest <- beingProcessedRef.modify { beingProcessed =>
         val theOldest = beingProcessed.head
         val newBeingProcessed = beingProcessed - container
-        val shouldContinue = theOldest == container
-        shouldContinue -> newBeingProcessed
+        theOldest -> newBeingProcessed
       }
+      shouldContinue = theOldest == container
       _ <- ZIO.when(shouldContinue)(processEvents())
     } yield ()
 

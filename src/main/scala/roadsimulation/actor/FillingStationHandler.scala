@@ -58,16 +58,9 @@ class FillingStationObject(
   }
 
 
-  def enter2(vehicle: Vehicle, currentTime: Double): UIO[SimEvent[FillingFinished]] =
-    for {
-      number <- counter.updateAndGet(_ + 1)
-      queueEntry = QueueEntry(vehicle, currentTime, number)
-      _ <- queue.update { case (places, entries) =>
-        places -> (entries + queueEntry)
-      }
-    } yield ???
-  //we need to hold somehow until our vehicle is out of the queue and filled
-  //maybe we could sleep until event?
+  def enterInstant(vehicle: Vehicle, currentTime: Double): UIO[ExitFromFillingStation] =
+    ZIO.succeed(ExitFromFillingStation(currentTime,
+      vehicle.copy(fuelLevelInJoule = vehicle.vehicleType.fuelCapacityInJoule)))
 
   private def handleQueue() = {
     for {

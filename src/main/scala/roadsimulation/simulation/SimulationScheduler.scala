@@ -49,7 +49,7 @@ object SimulationScheduler:
 
   def make(parallelismWindow: Double, endSimulationTime: Double): URIO[Scope, SimulationSchedulerImpl] =
     for {
-      currentEvent <- FiberRef.make(null.asInstanceOf[EventContainer])
+      currentEvent <- FiberRef.make(EventContainer(-1L, SimEvent(Double.NaN, ())))
       counter <- Ref.make(1L)
       //we put an event that prevents scheduler from get running
       processedSet <- Ref.make(SortedSet(zeroEvent()))

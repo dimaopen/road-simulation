@@ -49,7 +49,7 @@ object SimulationScheduler:
 
   def make(parallelismWindow: Double, endSimulationTime: Double): URIO[Scope, SimulationSchedulerImpl] =
     for {
-      currentEvent <- FiberRef.make(null.asInstanceOf[EventKey])
+      currentEvent <- FiberRef.make(EventKey(-1L, Double.NaN))
       counter <- Ref.make(0L)
       promise <- Promise.make[Nothing, Unit]
       //we put an event that prevents scheduler from get running
@@ -96,7 +96,8 @@ class SimulationSchedulerImpl(
   override def holdUntil(time: Double): UIO[HoldFinished] =
     for {
       myEventKey <- currentEventRef.get
-      updatedEventKey = myEventKey.copy(eventTime = time)
+      newNumber <- counter.updateAndGet(_ + 1)
+      updatedEventKey = myEventKey.copy(eventNumber = newNumber, eventTime = time)
       _ <- currentEventRef.set(updatedEventKey)
       p <- Promise.make[Nothing, Unit] //todo maybe Semaphore ?
       _ <- schedule(SimEvent(time, ()) { case _ =>

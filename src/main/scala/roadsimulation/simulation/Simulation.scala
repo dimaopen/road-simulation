@@ -1,10 +1,10 @@
 package roadsimulation.simulation
 
-import roadsimulation.actor.{RoadEventType, FillingStationHandler, VehicleHandlerImpl}
+import roadsimulation.actor.{FillingStationHandler, RoadEventType, VehicleHandlerImpl}
 import roadsimulation.model.{Scenario, Vehicle}
 import zio.*
 
-import java.util.concurrent.PriorityBlockingQueue
+import java.util.concurrent.{PriorityBlockingQueue, TimeUnit}
 
 /**
  * @author Dmitry Openkov
@@ -17,9 +17,13 @@ object Simulation {
         scheduler <- SimulationScheduler.make(parallelismWindow = 30, endSimulationTime = Double.PositiveInfinity)
         fillingStationHandler <- FillingStationHandler.make(scenario, scheduler)
         vehicleHandler = new VehicleHandlerImpl(scenario, scheduler, fillingStationHandler)
-        initialEvents <- vehicleHandler.initialEvents(scenario)
-        _ <- ZIO.foreach(initialEvents)(event => scheduler.schedule(event))
+//        initialEvents <- vehicleHandler.initialEvents(scenario)
+//        _ <- ZIO.foreach(initialEvents)(event => scheduler.schedule(event))
+        _ <- vehicleHandler.scheduleInitialEvents(scenario)
+        start <- zio.Clock.currentTime(TimeUnit.SECONDS)
         _ <- scheduler.startScheduling()
+        end <- zio.Clock.currentTime(TimeUnit.SECONDS)
+        _ <- Console.printLine(end - start).orDie
       } yield ()
 
     }

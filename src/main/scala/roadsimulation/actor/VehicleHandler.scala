@@ -18,14 +18,23 @@ class VehicleHandlerImpl(
   fillingStationHandler: FillingStationHandler
 ) extends VehicleHandler:
   def initialEvents(scenario: Scenario): UIO[IndexedSeq[SimEvent[VehicleContinueTraveling]]] = ZIO.succeed(
-    scenario.tripPlans.values.map { plan =>
-      SimEvent(
-        plan.startTime,
-        VehicleContinueTraveling(Vehicle(plan.id, plan.vehicleType, plan.initialFuelLevelInJoule, positionInM = 0.0),
-          entersRoad = true)
-      )(handleContinueTraveling)
-    }.toIndexedSeq
+    scenario.tripPlans.values.map(initialEventFromPlan).toIndexedSeq
   )
+
+  def scheduleInitialEvents(scenario: Scenario): UIO[Unit] = for {
+    _ <- ZIO.foreachParDiscard(scenario.tripPlans.values) { plan =>
+      val event = initialEventFromPlan(plan)
+      scheduler.schedule(event)
+    }
+  } yield ()
+
+  private def initialEventFromPlan(plan: TripPlan) = {
+    SimEvent(
+      plan.startTime,
+      VehicleContinueTraveling(Vehicle(plan.id, plan.vehicleType, plan.initialFuelLevelInJoule, positionInM = 0.0),
+        entersRoad = true)
+    )(handleContinueTraveling)
+  }
 
   private def handleContinueTraveling(event: SimEvent[VehicleContinueTraveling]): UIO[Unit] =
     val vehicle = event.eventType.vehicle
@@ -77,7 +86,7 @@ class VehicleHandlerImpl(
     val distanceToTravel = positionInM - vehicle.positionInM
     val nextEvent = if (vehicle.remainingRange < distanceToTravel)
       SimEvent(currentTime + vehicle.remainingRange / averageSpeedInMPerS,
-        RunOutOfGas(vehicle.drive(vehicle.remainingRange)))(roogEvent =>
+        RunOutOfGas(vehicle.drive(vehicle.remainingRange))) (roogEvent =>
         zio.Console.printLine(roogEvent.eventType.vehicle.id.toString() + " is finished with ROOG").orDie)
     else
       SimEvent(currentTime + distanceToTravel / averageSpeedInMPerS,

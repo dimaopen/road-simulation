@@ -144,8 +144,8 @@ class SimulationSchedulerImpl(
     for {
       _ <- currentEventRef.set(eventKey)
       _ <- ZIO.succeed(beingProcessed.put(eventKey, ()))
-      _ <- Console.printLine(event).orDie
-      //      _ <- ZIO.sleep(zio.Duration.fromMillis(300))
+      // _ <- Console.printLine(event).orDie
+      // _ <- ZIO.sleep(zio.Duration.fromMillis(300))
       _ <- event.handle()
       actualKey <- currentEventRef.get
       _ <- removeEventAndContinue(actualKey)
@@ -153,10 +153,8 @@ class SimulationSchedulerImpl(
 
   private def removeEventAndContinue(eventKey: EventKey): UIO[Unit] =
     for {
-      oldestEventKey <- ZIO.succeed(beingProcessed.firstKey())
-      shouldContinue = oldestEventKey == eventKey
       _ <- ZIO.succeed(beingProcessed.remove(eventKey))
-      _ <- ZIO.when(shouldContinue)(processEvents())
+      _ <- processEvents()
     } yield ()
 
 

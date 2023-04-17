@@ -2,6 +2,7 @@ package roadsimulation.actor
 
 import roadsimulation.model.{Scenario, SpaceTime, TripPlan, Vehicle}
 import roadsimulation.actor.RoadEventType.*
+import roadsimulation.actor.VehicleHandlerImpl.calculatePositionToStartSearchingForFuelStation
 import roadsimulation.simulation.SimulationScheduler
 import roadsimulation.simulation.SimulationScheduler.{NoHandler, SimEvent}
 import zio.UIO
@@ -86,15 +87,15 @@ class VehicleHandlerImpl(
     val distanceToTravel = positionInM - vehicle.positionInM
     val nextEvent = if (vehicle.remainingRange < distanceToTravel)
       SimEvent(currentTime + vehicle.remainingRange / averageSpeedInMPerS,
-        RunOutOfGas(vehicle.drive(vehicle.remainingRange))) (roogEvent =>
+        RunOutOfGas(vehicle.drive(vehicle.remainingRange)))(roogEvent =>
         zio.Console.printLine(roogEvent.eventType.vehicle.id.toString() + " is finished with ROOG").orDie)
     else
       SimEvent(currentTime + distanceToTravel / averageSpeedInMPerS,
         VehicleAtPosition(vehicle.drive(distanceToTravel), obj))(handleVehicleAtPosition)
     scheduler.schedule(nextEvent)
 
-
-  private def calculatePositionToStartSearchingForFuelStation(
+object VehicleHandlerImpl {
+  def calculatePositionToStartSearchingForFuelStation(
     vehicle: Vehicle,
     startSearchingForFillingStationThresholdInM: Double,
   ): Double =
@@ -103,6 +104,7 @@ class VehicleHandlerImpl(
     else
       val travelDistance = vehicle.remainingRange - startSearchingForFillingStationThresholdInM
       vehicle.positionInM + travelDistance + 0.001
+}
 
 
 

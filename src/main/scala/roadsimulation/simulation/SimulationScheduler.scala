@@ -16,6 +16,8 @@ import scala.collection.immutable.SortedSet
 trait SimulationScheduler:
   def schedule[T](simEvent: SimEvent[T]): UIO[Unit]
 
+  def schedule(time: Double, handler: => UIO[Unit]): UIO[Unit]
+
   def holdUntil(time: Double): UIO[HoldFinished]
 
   def startScheduling(): UIO[Unit]
@@ -91,6 +93,11 @@ class SimulationSchedulerImpl(
         ZIO.succeed(eventQueue.put(eventKey, simEvent))
       }
     } yield ()
+
+
+  def schedule(time: Double, handler: => UIO[Unit]): UIO[Unit] = {
+    schedule(SimEvent(time, ()) { * => handler })
+  }
 
 
   override def holdUntil(time: Double): UIO[HoldFinished] =

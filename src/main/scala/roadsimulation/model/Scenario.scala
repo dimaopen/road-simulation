@@ -9,7 +9,10 @@ import java.nio.file.{Path, Paths}
 /**
  * @author Dmitry Openkov
  */
-case class Id[T](value: String)
+opaque type Id[T] = String
+object Id:
+  def apply[T](id: String): Id[T] = id
+end Id
 
 case class Scenario(
   roadLengthInM: Double,
@@ -26,12 +29,12 @@ object Scenario {
     for {
       fillingStations <- loadFillingStations(Paths.get("input/msk-spb/filling-stations.csv"))
       vehicleTypes <- loadVehicleTypes(Paths.get("input/vehicle-types.csv"))
-      desiredVehicleTypeIds = Set(
-        "Car",
-        "DieselCar",
-        "RH_Car",
-        "BUS-DEFAULT",
-      ).map(Id.apply[VehicleType])
+      desiredVehicleTypeIds = Set[Id[VehicleType]](
+        Id("Car"),
+        Id("DieselCar"),
+        Id("RH_Car"),
+        Id("BUS-DEFAULT"),
+      )
       desiredTypes = vehicleTypes.filter(vehicleType => desiredVehicleTypeIds.contains(vehicleType.id))
       _ <- ZIO.when(desiredTypes.isEmpty) {
         ZIO.fail(new IllegalArgumentException("No desired vehicle types presented"))

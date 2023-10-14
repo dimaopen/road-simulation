@@ -48,7 +48,7 @@ case class Vehicle(
     val travelDistance = Math.min(distanceInM, remainingRange)
     this.copy(positionInM = positionInM + travelDistance, fuelLevelInJoule = fuelLevelAfterTraveling(travelDistance))
 
-  override def toString: String = "%s(%s; %,.2f; range = %,.0f; %s=%,.0f)".format(vehicleType.id.value,
+  override def toString: String = "%s(%s; %,.2f; range = %,.0f; %s=%,.0f)".format(vehicleType.id,
     id,
     positionInM,
     remainingRange,

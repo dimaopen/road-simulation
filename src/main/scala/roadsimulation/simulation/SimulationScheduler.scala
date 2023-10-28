@@ -1,12 +1,12 @@
 package roadsimulation.simulation
 
-import roadsimulation.simulation.SimulationScheduler.{EventHandler, HoldFinished, NoHandler, SimEvent, TimeInThePast, zeroEventKey}
+import roadsimulation.simulation.SimulationScheduler.{NoCancellingSupposed, Continuation, EventHandler, EventReference, SimEvent, TimeInThePast, zeroEventKey}
 import roadsimulation.simulation.SimulationSchedulerImpl.EventKey
 import zio.{Console, Fiber, FiberRef, IO, Promise, Ref, Scope, UIO, URIO, ZIO}
 
 import java.io.IOException
 import java.time.Duration
-import java.util.concurrent.{ConcurrentNavigableMap, ConcurrentSkipListMap, PriorityBlockingQueue}
+import java.util.concurrent.{ConcurrentMap, ConcurrentNavigableMap, ConcurrentSkipListMap, PriorityBlockingQueue}
 import scala.collection.immutable.SortedSet
 
 
@@ -14,40 +14,47 @@ import scala.collection.immutable.SortedSet
  * @author Dmitry Openkov
  */
 trait SimulationScheduler:
-  def schedule[T](simEvent: SimEvent[T]): UIO[Unit]
+  def schedule[T, U](simEvent: SimEvent[T, U]): UIO[Unit]
 
   def schedule(time: Double, handler: => UIO[Unit]): UIO[Unit]
 
-  def holdUntil(time: Double): UIO[HoldFinished]
+  def continueWhen(time: Double, obj: Option[Any] = None): UIO[Continuation]
+
+  def continueNow(obj: Any): UIO[Continuation]
 
   def startScheduling(): UIO[Unit]
 
 
 object SimulationScheduler:
-  case class SimEvent[+T](time: Double, eventType: T)(handler: EventHandler[T] = NoHandler) {
-    def handle(): UIO[Unit] = handler(this)
+  trait EventReference
 
-    override def toString: String = "SimEvent(%,.1f, %s)".format(time, eventType)
+  case class SimEvent[+T, +U](time: Double, eventType: T)
+    (handler: EventHandler[T], cancelHandler: CancelledEventHandler[T, U] = NoCancellingSupposed) {
+    def handle(): UIO[Unit] = handler(this.time, this.eventType)
+
+    override def toString: String = "SimEvent(%,.3f, %s)".format(time, eventType)
   }
 
-  type EventHandler[-T] = SimEvent[T] => UIO[Unit]
+  val NoCancellingSupposed: CancelledEventHandler[Any, Any] = (expectedTime, eventType, actualTime, userObject) =>
+    ZIO.dieMessage(s"No cancelling supposed. input: $expectedTime, $eventType, $actualTime, $userObject")
 
-  val NoHandler: EventHandler[Any] = _ => ZIO.succeed(())
+
+  type EventHandler[-T] = (Double, T) => UIO[Unit]
+  type CancelledEventHandler[-T, -U] = (Double, T, Double, U) => UIO[Unit]
 
   object SimEvent:
-    given orderingByTime: Ordering[SimEvent[_]] = Ordering.by(_.time)
+    given orderingByTime: Ordering[SimEvent[_, _]] = Ordering.by(_.time)
 
-    def apply[T](time: Double, eventType: T): SimEvent[T] = SimEvent(time, eventType)(NoHandler)
 
-  case class HoldFinished(time: Double, status: HoldExitStatus)
+  case class Continuation(time: Double, status: ContinuationStatus)
 
   case class TimeInThePast(
     now: Double,
-    event: SimEvent[_],
+    event: SimEvent[_, _],
   ) extends Exception(s"Time in the past: ${event.time}, now is $now, eventType = ${event.eventType}")
 
-  enum HoldExitStatus:
-    case ItsTime, Interrupted
+  enum ContinuationStatus:
+    case OnTime, Interrupted
 
   def make(parallelismWindow: Double, endSimulationTime: Double): URIO[Scope, SimulationSchedulerImpl] =
     for {
@@ -68,17 +75,19 @@ object SimulationScheduler:
 class SimulationSchedulerImpl(
   // event counter to separate events of the same time
   counter: Ref[Long],
-  // events that is being processed (using a Map as a Set, hence Any as a value type)
-  beingProcessed: ConcurrentNavigableMap[EventKey, Any],
+  // events that is being processed (using a Map as a Set, hence Unit as a value type)
+  beingProcessed: ConcurrentNavigableMap[EventKey, Unit],
   // queued events
-  eventQueue: ConcurrentNavigableMap[EventKey, SimEvent[_]],
+  eventQueue: ConcurrentNavigableMap[EventKey, SimEvent[_, _]],
+  //
+  //  objectMap: ConcurrentMap[Any, Promise],
   currentEventRef: FiberRef[EventKey],
   endPromise: Promise[Nothing, Unit],
   parallelismWindow: Double,
   endSimulationTime: Double,
 ) extends SimulationScheduler:
 
-  override def schedule[T](simEvent: SimEvent[T]): UIO[Unit] =
+  override def schedule[T, U](simEvent: SimEvent[T, U]): UIO[Unit] =
     if (simEvent.time > endSimulationTime)
       Console.printLine("Outside of simulation end time: " + simEvent).orDie
     else for {
@@ -96,26 +105,36 @@ class SimulationSchedulerImpl(
 
 
   def schedule(time: Double, handler: => UIO[Unit]): UIO[Unit] = {
-    schedule(SimEvent(time, ()) { * => handler })
+    schedule(SimEvent(time, ())((_, _) => handler, NoCancellingSupposed))
   }
 
 
-  override def holdUntil(time: Double): UIO[HoldFinished] =
+  override def continueWhen(time: Double, obj: Option[Any] = None): UIO[Continuation] =
     for {
+      // get the event that triggered this fiber execution
       myEventKey <- currentEventRef.get
       newNumber <- counter.updateAndGet(_ + 1)
+      // obviously we need to modify event key since the time is different
       updatedEventKey = myEventKey.copy(eventNumber = newNumber, eventTime = time)
       _ <- currentEventRef.set(updatedEventKey)
-      p <- Promise.make[Nothing, Unit] //todo maybe Semaphore ?
-      _ <- schedule(SimEvent(time, ()) { case _ =>
-        // when it's time we put the event back to beingProcessed
+      p <- Promise.make[Nothing, Unit]
+      // we scheduling a "fake" event for the requrested time
+      _ <- schedule(SimEvent(time, ()) { (_, _) =>
+        // when it's time we put the original event back to beingProcessed
         ZIO.succeed(beingProcessed.put(updatedEventKey, ())) *>
+          // release the fiber
           p.succeed(()).unit
       })
+      // now we remove the event that triggered this fiber execution to allow the simulation continue
       _ <- removeEventAndContinue(myEventKey)
+      // current fiber must wait until the requested time (until we release it using p Promise)
       _ <- p.await
-    } yield HoldFinished(time, SimulationScheduler.HoldExitStatus.ItsTime)
+    } yield Continuation(time, SimulationScheduler.ContinuationStatus.OnTime)
 
+
+  override def continueNow(obj: Any): UIO[Continuation] = {
+    ???
+  }
 
   def startScheduling(): UIO[Unit] =
     for {
@@ -138,7 +157,7 @@ class SimulationSchedulerImpl(
         import scala.jdk.CollectionConverters._
         val events = eventQueue.headMap(EventKey(0, now + parallelismWindow))
         val keys = events.keySet().asScala
-        keys.foldLeft(IndexedSeq.empty[(EventKey, SimEvent[_])]) { case (acc, key) =>
+        keys.foldLeft(IndexedSeq.empty[(EventKey, SimEvent[_, _])]) { case (acc, key) =>
           val event = events.remove(key)
           if (event == null) acc
           else acc :+ (key, event)
@@ -147,7 +166,7 @@ class SimulationSchedulerImpl(
       _ <- ZIO.foreach(eventsToProcess) { case (eventKey, event) => process(eventKey, event).forkDaemon }
     } yield ()
 
-  private def process(eventKey: EventKey, event: SimEvent[_]): UIO[Unit] =
+  private def process(eventKey: EventKey, event: SimEvent[_, _]): UIO[Unit] =
     for {
       _ <- currentEventRef.set(eventKey)
       _ <- ZIO.succeed(beingProcessed.put(eventKey, ()))
@@ -166,7 +185,7 @@ class SimulationSchedulerImpl(
 
 
 object SimulationSchedulerImpl:
-  case class EventKey(eventNumber: Long, eventTime: Double) extends Comparable[EventKey] {
+  case class EventKey(eventNumber: Long, eventTime: Double) extends Comparable[EventKey], EventReference {
     override def compareTo(other: EventKey): Int = {
       val timeComp = java.lang.Double.compare(this.eventTime, other.eventTime)
       if (timeComp != 0) timeComp else java.lang.Long.compare(this.eventNumber, other.eventNumber)

@@ -4,7 +4,7 @@ import roadsimulation.model.{Scenario, SpaceTime, TripPlan, Vehicle}
 import roadsimulation.actor.RoadEventType.*
 import roadsimulation.actor.VehicleHandlerImpl.calculatePositionToStartSearchingForFuelStation
 import roadsimulation.simulation.SimulationScheduler
-import roadsimulation.simulation.SimulationScheduler.{NoHandler, SimEvent}
+import roadsimulation.simulation.SimulationScheduler.{SimEvent}
 import zio.UIO
 import zio.ZIO
 
@@ -18,7 +18,7 @@ class VehicleHandlerImpl(
   scheduler: SimulationScheduler,
   fillingStationHandler: FillingStationHandler
 ) extends VehicleHandler:
-  def initialEvents(scenario: Scenario): UIO[IndexedSeq[SimEvent[VehicleContinueTraveling]]] = ZIO.succeed(
+  def initialEvents(scenario: Scenario): UIO[IndexedSeq[SimEvent[VehicleContinueTraveling, Unit]]] = ZIO.succeed(
     scenario.tripPlans.values.map(initialEventFromPlan).toIndexedSeq
   )
 
@@ -37,8 +37,8 @@ class VehicleHandlerImpl(
     )(handleContinueTraveling)
   }
 
-  private def handleContinueTraveling(event: SimEvent[VehicleContinueTraveling]): UIO[Unit] =
-    val vehicle = event.eventType.vehicle
+  private def handleContinueTraveling(time: Double, continueTraveling: VehicleContinueTraveling): UIO[Unit] =
+    val vehicle = continueTraveling.vehicle
     val currentPosition = vehicle.positionInM
     if (currentPosition >= scenario.roadLengthInM)
     // we reached the destination, end up here
@@ -50,31 +50,31 @@ class VehicleHandlerImpl(
         case Some(station) =>
           goToPositionWithObject(Some(station),
             station.fillingStation.positionInM,
-            event.time,
+            time,
             vehicle,
             scenario.speedLimitInMPerS)
         case None =>
-          goToPositionWithObject(None, scenario.roadLengthInM, event.time,
+          goToPositionWithObject(None, scenario.roadLengthInM, time,
             vehicle,
             scenario.speedLimitInMPerS)
     else
       goToPositionWithObject(None,
         math.min(nextPosition, scenario.roadLengthInM),
-        event.time,
+        time,
         vehicle,
         scenario.speedLimitInMPerS).unit
 
-  private def handleVehicleAtPosition(event: SimEvent[VehicleAtPosition[FillingStationObject]]): UIO[Unit] = {
-    event.eventType.possibleObject match
+  private def handleVehicleAtPosition(time: Double, vehicleAtPosition: VehicleAtPosition[FillingStationObject]): UIO[Unit] = {
+    vehicleAtPosition.possibleObject match
       case Some(fillingStationObject) =>
-        val vehicle = event.eventType.vehicle
+        val vehicle = vehicleAtPosition.vehicle
         for {
-          exit <- fillingStationObject.enter(vehicle, event.time)
-          _ <- handleContinueTraveling(SimEvent(exit.time, VehicleContinueTraveling(exit.vehicle, entersRoad = true)))
+          exit <- fillingStationObject.enter(vehicle, time)
+          _ <- handleContinueTraveling(exit.time, VehicleContinueTraveling(exit.vehicle, entersRoad = true))
         } yield ()
       case None =>
-        val vehicle = event.eventType.vehicle
-        handleContinueTraveling(SimEvent(event.time, VehicleContinueTraveling(vehicle, entersRoad = false)))
+        val vehicle = vehicleAtPosition.vehicle
+        handleContinueTraveling(time, VehicleContinueTraveling(vehicle, entersRoad = false))
   }
 
   private def goToPositionWithObject(
@@ -87,8 +87,8 @@ class VehicleHandlerImpl(
     val distanceToTravel = positionInM - vehicle.positionInM
     val nextEvent = if (vehicle.remainingRange < distanceToTravel)
       SimEvent(currentTime + vehicle.remainingRange / averageSpeedInMPerS,
-        RunOutOfGas(vehicle.drive(vehicle.remainingRange)))(roogEvent =>
-        zio.Console.printLine(roogEvent.eventType.vehicle.id.toString() + " is finished with ROOG").orDie)
+        RunOutOfGas(vehicle.drive(vehicle.remainingRange)))((time, runOutOfGas) =>
+        zio.Console.printLine(s"${runOutOfGas.vehicle.id} is finished with runOutOfGas").orDie)
     else
       SimEvent(currentTime + distanceToTravel / averageSpeedInMPerS,
         VehicleAtPosition(vehicle.drive(distanceToTravel), obj))(handleVehicleAtPosition)

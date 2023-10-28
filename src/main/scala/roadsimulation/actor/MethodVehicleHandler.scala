@@ -4,7 +4,7 @@ import roadsimulation.actor.RoadEventType.{RunOutOfGas, VehicleAtPosition, Vehic
 import roadsimulation.actor.VehicleHandlerImpl.calculatePositionToStartSearchingForFuelStation
 import roadsimulation.model.{Scenario, TripPlan, Vehicle}
 import roadsimulation.simulation.SimulationScheduler
-import roadsimulation.simulation.SimulationScheduler.{HoldFinished, SimEvent}
+import roadsimulation.simulation.SimulationScheduler.{Continuation, SimEvent}
 import zio.{UIO, ZIO}
 
 /**
@@ -96,10 +96,10 @@ class MethodVehicleHandler(
     val distanceToTravel = positionInM - vehicle.positionInM
     if (vehicle.remainingRange < distanceToTravel) {
       val nextTime = currentTime + vehicle.remainingRange / averageSpeedInMPerS
-      scheduler.holdUntil(nextTime).as(nextTime -> Left(RunOutOfGas(vehicle.drive(vehicle.remainingRange))))
+      scheduler.continueWhen(nextTime).as(nextTime -> Left(RunOutOfGas(vehicle.drive(vehicle.remainingRange))))
     } else {
       val nextTime = currentTime + distanceToTravel / averageSpeedInMPerS
-      scheduler.holdUntil(nextTime).as(nextTime -> Right(vehicle.drive(distanceToTravel)))
+      scheduler.continueWhen(nextTime).as(nextTime -> Right(vehicle.drive(distanceToTravel)))
     }
 
 }

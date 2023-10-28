@@ -3,7 +3,7 @@ package roadsimulation.actor
 import roadsimulation.model.FuelType.*
 import roadsimulation.model.{FillingStation, FuelType, Id, Scenario, Vehicle}
 import roadsimulation.simulation.SimulationScheduler
-import roadsimulation.simulation.SimulationScheduler.{HoldFinished, SimEvent}
+import roadsimulation.simulation.SimulationScheduler.{Continuation, SimEvent}
 import zio.{Queue, Ref, UIO, ZIO}
 
 import scala.collection.immutable.{TreeMap, TreeSet}
@@ -50,8 +50,8 @@ class FillingStationObject(
 ):
   def enter(vehicle: Vehicle, enterTime: Double): UIO[ExitFromFillingStation] = {
     val ttf = timeToFill(vehicle)
-    scheduler.holdUntil(enterTime + ttf)
-      .map { case HoldFinished(time, _) =>
+    scheduler.continueWhen(enterTime + ttf, Some(vehicle))
+      .map { case Continuation(time, _) =>
         val addedFuel = caclAddedFuel(vehicle, time - enterTime)
         ExitFromFillingStation(time, vehicle.copy(fuelLevelInJoule = vehicle.fuelLevelInJoule + addedFuel))
       }

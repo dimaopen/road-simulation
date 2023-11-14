@@ -38,7 +38,9 @@ case class QueueEntry(vehicle: Vehicle, enterTime: Double, number: Int)
 object QueueEntry:
   given containerOrdering[T]: Ordering[QueueEntry] = Ordering.by(entry => entry.enterTime -> entry.number)
 
-final case class FillingFinished(queueEntry: QueueEntry) extends RoadEventType
+final case class FillingFinished(queueEntry: QueueEntry) extends RoadEventType:
+  override def vehicle: Vehicle = queueEntry.vehicle
+end FillingFinished
 
 final case class ExitFromFillingStation(time: Double, vehicle: Vehicle)
 
@@ -53,11 +55,11 @@ class FillingStationObject(
     scheduler.continueWhen(enterTime + ttf, Some(vehicle))
       .map { case Continuation(time, _) =>
         val addedFuel = caclAddedFuel(vehicle, time - enterTime)
-        ExitFromFillingStation(time, vehicle.copy(fuelLevelInJoule = vehicle.fuelLevelInJoule + addedFuel))
+        ExitFromFillingStation(time, vehicle.copy(fuelLevelInJoule = vehicle.fuelLevelInJoule + addedFuel, time = time))
       }
   }
 
-
+  //todo not used anywhere
   def enterInstant(vehicle: Vehicle, currentTime: Double): UIO[ExitFromFillingStation] =
     ZIO.succeed(ExitFromFillingStation(currentTime,
       vehicle.copy(fuelLevelInJoule = vehicle.vehicleType.fuelCapacityInJoule)))

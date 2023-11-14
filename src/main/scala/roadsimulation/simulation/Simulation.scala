@@ -1,6 +1,6 @@
 package roadsimulation.simulation
 
-import roadsimulation.actor.{FillingStationHandler, MethodVehicleHandler, RoadEventType, VehicleHandlerImpl}
+import roadsimulation.actor.{FillingStationHandler, MethodVehicleHandler, PersonHandler, RoadEventType, VehicleHandlerImpl}
 import roadsimulation.model.{Scenario, Vehicle}
 import zio.*
 
@@ -17,8 +17,7 @@ object Simulation {
         scheduler <- SimulationScheduler.make(parallelismWindow = 30, endSimulationTime = Double.PositiveInfinity)
         fillingStationHandler <- FillingStationHandler.make(scenario, scheduler)
         vehicleHandler = new MethodVehicleHandler(scenario, scheduler, fillingStationHandler)
-//        initialEvents <- vehicleHandler.initialEvents(scenario)
-//        _ <- ZIO.foreach(initialEvents)(event => scheduler.schedule(event))
+        personHandler = new PersonHandler(scenario, scheduler)
         _ <- vehicleHandler.scheduleInitialEvents(scenario)
         start <- zio.Clock.currentTime(TimeUnit.SECONDS)
         _ <- scheduler.startScheduling()

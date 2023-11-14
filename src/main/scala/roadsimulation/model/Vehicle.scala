@@ -37,20 +37,29 @@ case class Vehicle(
   id: Id[TripPlan],
   vehicleType: VehicleType,
   fuelLevelInJoule: Double,
+  passengers: Set[Person],
   positionInM: Double,
+  time: Double
 ) {
   val remainingRange: Double = fuelLevelInJoule / vehicleType.fuelConsumptionInJoulePerMeter
+
+  def isRunOutOfGas: Boolean = remainingRange <= 0
 
   def fuelLevelAfterTraveling(distanceInM: Double): Double =
     fuelLevelInJoule - distanceInM * vehicleType.fuelConsumptionInJoulePerMeter
 
-  def drive(distanceInM: Double): Vehicle =
-    val travelDistance = Math.min(distanceInM, remainingRange)
-    this.copy(positionInM = positionInM + travelDistance, fuelLevelInJoule = fuelLevelAfterTraveling(travelDistance))
+  def drive(toPositionInM: Double, speedLimitInMPerS: Double): Vehicle =
+    val travelDistance = math.min(toPositionInM - positionInM, remainingRange)
+    val speed: Double = vehicleType.maxVelocity.fold(speedLimitInMPerS)(math.min(speedLimitInMPerS, _))
+    val nextTime = time + travelDistance / speed
+    this.copy(positionInM = positionInM + travelDistance,
+      fuelLevelInJoule = fuelLevelAfterTraveling(travelDistance),
+      time = nextTime)
 
-  override def toString: String = "%s(%s; %,.2f; range = %,.0f; %s=%,.0f)".format(vehicleType.id,
+  override def toString: String = "%s(%s; %.2fm, %.2fs; range = %.0f; %s=%,.0f)".format(vehicleType.id,
     id,
     positionInM,
+    time,
     remainingRange,
     vehicleType.fuelType,
     fuelLevelInJoule)

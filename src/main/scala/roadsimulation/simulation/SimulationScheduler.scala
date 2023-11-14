@@ -1,6 +1,6 @@
 package roadsimulation.simulation
 
-import roadsimulation.simulation.SimulationScheduler.{NoCancellingSupposed, Continuation, EventHandler, EventReference, SimEvent, TimeInThePast, zeroEventKey}
+import roadsimulation.simulation.SimulationScheduler.{Continuation, EventHandler, EventReference, NoCancellingSupposed, NoEventReference, SimEvent, TimeInThePast, zeroEventKey}
 import roadsimulation.simulation.SimulationSchedulerImpl.EventKey
 import zio.{Console, Fiber, FiberRef, IO, Promise, Ref, Scope, UIO, URIO, ZIO}
 
@@ -14,9 +14,11 @@ import scala.collection.immutable.SortedSet
  * @author Dmitry Openkov
  */
 trait SimulationScheduler:
-  def schedule[T, U](simEvent: SimEvent[T, U]): UIO[Unit]
+  def schedule[T, U](simEvent: SimEvent[T, U]): UIO[EventReference]
 
-  def schedule(time: Double, handler: => UIO[Unit]): UIO[Unit]
+  def schedule(time: Double, handler: => UIO[Unit]): UIO[EventReference]
+
+  def cancel[U](time: Double, obj: U): UIO[Unit]
 
   def continueWhen(time: Double, obj: Option[Any] = None): UIO[Continuation]
 
@@ -38,6 +40,7 @@ object SimulationScheduler:
   val NoCancellingSupposed: CancelledEventHandler[Any, Any] = (expectedTime, eventType, actualTime, userObject) =>
     ZIO.dieMessage(s"No cancelling supposed. input: $expectedTime, $eventType, $actualTime, $userObject")
 
+  object NoEventReference extends EventReference
 
   type EventHandler[-T] = (Double, T) => UIO[Unit]
   type CancelledEventHandler[-T, -U] = (Double, T, Double, U) => UIO[Unit]
@@ -53,8 +56,9 @@ object SimulationScheduler:
     event: SimEvent[_, _],
   ) extends Exception(s"Time in the past: ${event.time}, now is $now, eventType = ${event.eventType}")
 
-  enum ContinuationStatus:
-    case OnTime, Interrupted
+  sealed trait ContinuationStatus
+  object OnTime extends ContinuationStatus
+  case class Interrupted(data: Any) extends ContinuationStatus
 
   def make(parallelismWindow: Double, endSimulationTime: Double): URIO[Scope, SimulationSchedulerImpl] =
     for {
@@ -87,9 +91,9 @@ class SimulationSchedulerImpl(
   endSimulationTime: Double,
 ) extends SimulationScheduler:
 
-  override def schedule[T, U](simEvent: SimEvent[T, U]): UIO[Unit] =
+  override def schedule[T, U](simEvent: SimEvent[T, U]): UIO[EventReference] =
     if (simEvent.time > endSimulationTime)
-      Console.printLine("Outside of simulation end time: " + simEvent).orDie
+      Console.printLine("Outside of simulation end time: " + simEvent).orDie as NoEventReference
     else for {
       now <- ZIO.succeed(beingProcessed.firstKey().eventTime)
       _ <- ZIO.when(simEvent.time < now)(ZIO.die(TimeInThePast(now, simEvent)))
@@ -101,10 +105,10 @@ class SimulationSchedulerImpl(
       } else {
         ZIO.succeed(eventQueue.put(eventKey, simEvent))
       }
-    } yield ()
+    } yield (eventKey)
 
 
-  def schedule(time: Double, handler: => UIO[Unit]): UIO[Unit] = {
+  def schedule(time: Double, handler: => UIO[Unit]): UIO[EventReference] = {
     schedule(SimEvent(time, ())((_, _) => handler, NoCancellingSupposed))
   }
 
@@ -118,7 +122,7 @@ class SimulationSchedulerImpl(
       updatedEventKey = myEventKey.copy(eventNumber = newNumber, eventTime = time)
       _ <- currentEventRef.set(updatedEventKey)
       p <- Promise.make[Nothing, Unit]
-      // we scheduling a "fake" event for the requrested time
+      // we scheduling a "fake" event for the requested time
       _ <- schedule(SimEvent(time, ()) { (_, _) =>
         // when it's time we put the original event back to beingProcessed
         ZIO.succeed(beingProcessed.put(updatedEventKey, ())) *>
@@ -129,8 +133,12 @@ class SimulationSchedulerImpl(
       _ <- removeEventAndContinue(myEventKey)
       // current fiber must wait until the requested time (until we release it using p Promise)
       _ <- p.await
-    } yield Continuation(time, SimulationScheduler.ContinuationStatus.OnTime)
+    } yield Continuation(time, SimulationScheduler.OnTime)
 
+
+  override def cancel[U](time: Double, obj: U): UIO[Unit] = {
+    ???
+  }
 
   override def continueNow(obj: Any): UIO[Continuation] = {
     ???

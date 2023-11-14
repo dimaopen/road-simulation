@@ -12,6 +12,7 @@ lazy val root = project
     libraryDependencies += "dev.zio" %% "zio" % zioVersion,
     libraryDependencies += "com.github.tototoshi" %% "scala-csv" % "1.3.10",
     libraryDependencies ++= Seq(
+      "org.scalatest" %% "scalatest" % "3.2.17" % Test,
       "dev.zio" %% "zio-test" % zioVersion % Test,
       "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
       "dev.zio" %% "zio-test-magnolia" % zioVersion % Test,

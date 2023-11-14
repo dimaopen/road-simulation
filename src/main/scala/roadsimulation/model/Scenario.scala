@@ -1,6 +1,8 @@
 package roadsimulation.model
 
-import roadsimulation.model.FuelType._
+import roadsimulation.model.FuelType.*
+import roadsimulation.model.*
+import roadsimulation.model.Person.Gender
 import roadsimulation.util.CsvReader
 import zio.*
 
@@ -19,6 +21,7 @@ case class Scenario(
   speedLimitInKmPerHour: Double,
   endTime: Int,
   fillingStations: Map[Id[FillingStation], FillingStation],
+  persons: Map[Id[Person], Person],
   tripPlans: Map[Id[TripPlan], TripPlan]
 ) {
   val speedLimitInMPerS: Double = speedLimitInKmPerHour / 3.6
@@ -39,12 +42,16 @@ object Scenario {
       _ <- ZIO.when(desiredTypes.isEmpty) {
         ZIO.fail(new IllegalArgumentException("No desired vehicle types presented"))
       }
+      roadLength = 600_000.0
+      persons <- generatePersons(2000, 3 * 3600, 18 * 3600, roadLength, -33472)
       tripPlans <- generateTripPlans(9000,
         NonEmptyChunk(desiredTypes.head, desiredTypes.tail: _*),
         4 * 3600,
         8 * 3600 + 2,
         777)
-    } yield Scenario(600_000.0, 100, 86400 * 2, fillingStations, tripPlans)
+    } yield {
+      Scenario(roadLength, 100, 86400 * 2, fillingStations, persons, tripPlans)
+    }
   }
 
   def generateTripPlans(
@@ -69,8 +76,38 @@ object Scenario {
     )
 
     Random.setSeed(seed) *> ZIO.foreach(1 to n)(createTripPlan).map(_.groupMapReduce(_.id)(identity)((a, _) => a))
+  }
 
+  def generatePersons(
+    n: Int,
+    startTime: Int,
+    endTime: Int,
+    roadLength: Double,
+    seed: Int
+  ): UIO[Map[Id[Person], Person]] = {
+    def createPersonPlan(): UIO[PersonPlan] = for {
+      origin <- Random.nextDoubleBetween(0, roadLength - 1000)
+      rnd <- Random.nextDouble
+      destination <- if (rnd < 0.3) ZIO.succeed(roadLength) else Random.nextDoubleBetween(origin + 500, roadLength)
+      startTime <- Random.nextDoubleBetween(startTime, endTime)
+    } yield PersonPlan(origin, destination, startTime)
 
+    def createPerson(idNum: Int): UIO[Person] = for {
+      personPlan <- createPersonPlan()
+      age <- Random.nextGaussian.map(_ * 15 + 30).map(Math.max(18, _))
+      gender <- Random.nextIntBounded(Gender.values.length).map(Gender.values)
+      money <- Random.nextGaussian.map(_ * 50 + 50).map(Math.max(10, _))
+    } yield Person(
+      Id(idNum.toString),
+      math.round(age).toInt,
+      gender,
+      personPlan.originInM,
+      personPlan.startTime,
+      money,
+      personPlan
+    )
+
+    Random.setSeed(seed) *> ZIO.foreach(1 to n)(createPerson).map(_.groupMapReduce(_.id)(identity)((a, _) => a))
   }
 
   def loadFillingStations(path: Path): Task[Map[Id[FillingStation], FillingStation]] = {

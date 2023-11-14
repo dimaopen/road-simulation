@@ -33,7 +33,7 @@ class SimulationSchedulerSpec extends JUnitRunnableSpec {
       startTime = 16197,
       startSearchingForFillingStationThresholdInM = 172866.45809750466
     ))
-    Scenario(600_000.0, 100, 86400 * 2, fillingStations(), plans.groupMapReduce(_.id)(identity)((a, _) => a))
+    Scenario(600_000.0, 100, 86400 * 2, fillingStations(), Map.empty, plans.groupMapReduce(_.id)(identity)((a, _) => a))
   }
 
   private def vehicleTypeCar(): VehicleType = {

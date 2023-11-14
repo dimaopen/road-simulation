@@ -4,8 +4,9 @@ import roadsimulation.actor.RoadEventType.{RunOutOfGas, VehicleAtPosition, Vehic
 import roadsimulation.actor.VehicleHandlerImpl.calculatePositionToStartSearchingForFuelStation
 import roadsimulation.model.{Scenario, TripPlan, Vehicle}
 import roadsimulation.simulation.SimulationScheduler
-import roadsimulation.simulation.SimulationScheduler.{Continuation, SimEvent}
-import zio.{UIO, ZIO}
+import roadsimulation.simulation.SimulationScheduler.{Interrupted, OnTime}
+import roadsimulation.simulation.SimulationScheduler.{Continuation, ContinuationStatus, SimEvent}
+import zio.{Exit, UIO, ZIO}
 
 /**
  * @author Dmitry Openkov
@@ -14,11 +15,18 @@ class MethodVehicleHandler(
   scenario: Scenario,
   scheduler: SimulationScheduler,
   fillingStationHandler: FillingStationHandler
-) extends VehicleHandler {
+) extends VehicleHandler:
+
+  private val vehicleSpatialIndex = new VehicleSpatialIndex
 
   def scheduleInitialEvents(scenario: Scenario): UIO[Unit] = for {
     _ <- ZIO.foreachParDiscard(scenario.tripPlans.values) { plan =>
-      val vehicle = Vehicle(plan.id, plan.vehicleType, plan.initialFuelLevelInJoule, positionInM = 0.0)
+      val vehicle = Vehicle(plan.id,
+        plan.vehicleType,
+        plan.initialFuelLevelInJoule,
+        passengers = Set.empty,
+        positionInM = 0.0,
+        time = plan.startTime)
       scheduler.schedule(plan.startTime, vehicleEntersRoad(plan, vehicle, plan.startTime))
     }
   } yield ()
@@ -30,76 +38,82 @@ class MethodVehicleHandler(
     val nextPosition = calculatePositionToStartSearchingForFuelStation(vehicle,
       plan.startSearchingForFillingStationThresholdInM)
     if (nextPosition <= vehicle.positionInM)
-      findFillingStation(plan, vehicle, time)
+      findFillingStation(plan, vehicle)
     else
       for {
-        result <- goToPosition(
-          math.min(nextPosition, scenario.roadLengthInM),
+        nextVehicle <- goToPosition(
+          nextPosition,
           time,
           vehicle,
-          scenario.speedLimitInMPerS)
-        _ <- result match
-          case (nextTime, Right(vehicle)) =>
-            findFillingStation(plan, vehicle, nextTime)
-          case (time, Left(runOutOfGas)) =>
-            handleRunOutOfGas(time, runOutOfGas)
+          scenario.speedLimitInMPerS,
+          scenario.roadLengthInM,
+        )
+        _ <- ZIO.when(nextVehicle.positionInM >= nextPosition) {
+          findFillingStation(plan, nextVehicle)
+        }
+
       } yield ()
 
   }
 
   private def findFillingStation(
     plan: TripPlan,
-    vehicle: Vehicle,
-    time: Double
+    vehicle: Vehicle
   ) = {
     fillingStationHandler.findNearestStationAfter(vehicle.positionInM) match
       case Some(station) =>
         for {
-          result <- goToPosition(station.fillingStation.positionInM,
-            time,
+          nextVehicle <- goToPosition(station.fillingStation.positionInM,
+            vehicle.time,
             vehicle,
-            scenario.speedLimitInMPerS)
-          _ <- result match
-            case (arrivedAtStationTime, Right(vehicle)) =>
-              for {
-                exitFromFillingStation <- station.enter(vehicle, arrivedAtStationTime)
-                _ <- vehicleEntersRoad(plan, exitFromFillingStation.vehicle, exitFromFillingStation.time)
-              } yield ()
-            case (time, Left(runOutOfGas)) =>
-              handleRunOutOfGas(time, runOutOfGas)
+            scenario.speedLimitInMPerS,
+            scenario.roadLengthInM,
+          )
+          _ <- ZIO.when(!nextVehicle.isRunOutOfGas) {
+            for {
+              exitFromFillingStation <- station.enter(nextVehicle, nextVehicle.time)
+              _ <- vehicleEntersRoad(plan, exitFromFillingStation.vehicle, exitFromFillingStation.time)
+            } yield ()
+          }
         } yield ()
 
       case None =>
         for {
-          result <- goToPosition(scenario.roadLengthInM, time,
+          nextVehicle <- goToPosition(
+            scenario.roadLengthInM,
+            vehicle.time,
             vehicle,
-            scenario.speedLimitInMPerS)
-          _ <- result match
-            case (finishTime, Right(vehicle)) =>
-              zio.Console.printLine(s"${vehicle.id} is finished at time $finishTime").orDie
-            case (time, Left(runOutOfGas)) =>
-              handleRunOutOfGas(time, runOutOfGas)
+            scenario.speedLimitInMPerS,
+            scenario.roadLengthInM,
+          )
         } yield ()
 
   }
-
-  private def handleRunOutOfGas(time: Double, runOutOfGas: RunOutOfGas) =
-    zio.Console.printLine(s"${runOutOfGas.vehicle.id} is finished with ROOG at $time").orDie
 
 
   private def goToPosition(
     positionInM: Double,
     currentTime: Double,
     vehicle: Vehicle,
-    averageSpeedInMPerS: Double,
-  ): UIO[(Double, Either[RunOutOfGas, Vehicle])] =
-    val distanceToTravel = positionInM - vehicle.positionInM
-    if (vehicle.remainingRange < distanceToTravel) {
-      val nextTime = currentTime + vehicle.remainingRange / averageSpeedInMPerS
-      scheduler.continueWhen(nextTime).as(nextTime -> Left(RunOutOfGas(vehicle.drive(vehicle.remainingRange))))
-    } else {
-      val nextTime = currentTime + distanceToTravel / averageSpeedInMPerS
-      scheduler.continueWhen(nextTime).as(nextTime -> Right(vehicle.drive(distanceToTravel)))
-    }
+    speedLimitInMPerS: Double,
+    roadLengthInM: Double,
+  ): UIO[Vehicle] =
+    val nextPosition = math.min(positionInM, scenario.roadLengthInM)
+    val nextVehicle = vehicle.drive(nextPosition, speedLimitInMPerS)
+    scheduler.continueWhen(nextVehicle.time)
+      .flatMap {
+        case Continuation(time, OnTime) =>
+          ZIO.when(nextVehicle.isRunOutOfGas) {
+            zio.Console.printLine(s"${nextVehicle} is finished with ROOG").orDie
+          } *> ZIO.when(nextVehicle.positionInM >= roadLengthInM) {
+            zio.Console.printLine(s"${vehicle} is finished").orDie
+          }.as(nextVehicle)
+        case Continuation(time, Interrupted(person)) =>
+          ZIO.succeed(nextVehicle)
+      }
 
-}
+
+end MethodVehicleHandler
+
+
+

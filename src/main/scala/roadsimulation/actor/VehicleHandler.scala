@@ -77,8 +77,8 @@ class VehicleHandlerImpl(
       case Some(fillingStationObject) =>
         val vehicle = vehicleAtPosition.vehicle
         for {
-          exit <- fillingStationObject.enter(vehicle, time)
-          _ <- handleContinueTraveling(exit.time, VehicleContinueTraveling(exit.vehicle, entersRoad = true))
+          exitVehicle <- fillingStationObject.enter(vehicle, time)
+          _ <- handleContinueTraveling(exitVehicle.time, VehicleContinueTraveling(exitVehicle, entersRoad = true))
         } yield ()
       case None =>
         val vehicle = vehicleAtPosition.vehicle

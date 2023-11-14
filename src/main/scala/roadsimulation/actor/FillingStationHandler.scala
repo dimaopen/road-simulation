@@ -42,27 +42,20 @@ final case class FillingFinished(queueEntry: QueueEntry) extends RoadEventType:
   override def vehicle: Vehicle = queueEntry.vehicle
 end FillingFinished
 
-final case class ExitFromFillingStation(time: Double, vehicle: Vehicle)
-
 class FillingStationObject(
   val fillingStation: FillingStation,
   scheduler: SimulationScheduler,
   counter: Ref[Int],
   queue: Ref[(TreeSet[QueueEntry], TreeSet[QueueEntry])]
 ):
-  def enter(vehicle: Vehicle, enterTime: Double): UIO[ExitFromFillingStation] = {
+  def enter(vehicle: Vehicle, enterTime: Double): UIO[Vehicle] = {
     val ttf = timeToFill(vehicle)
     scheduler.continueWhen(enterTime + ttf, Some(vehicle))
       .map { case Continuation(time, _) =>
         val addedFuel = caclAddedFuel(vehicle, time - enterTime)
-        ExitFromFillingStation(time, vehicle.copy(fuelLevelInJoule = vehicle.fuelLevelInJoule + addedFuel, time = time))
+        vehicle.copy(fuelLevelInJoule = vehicle.fuelLevelInJoule + addedFuel, time = time)
       }
   }
-
-  //todo not used anywhere
-  def enterInstant(vehicle: Vehicle, currentTime: Double): UIO[ExitFromFillingStation] =
-    ZIO.succeed(ExitFromFillingStation(currentTime,
-      vehicle.copy(fuelLevelInJoule = vehicle.vehicleType.fuelCapacityInJoule)))
 
   private def handleQueue() = {
     for {

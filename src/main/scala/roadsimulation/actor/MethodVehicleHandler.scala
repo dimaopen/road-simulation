@@ -27,11 +27,11 @@ class MethodVehicleHandler(
         passengers = Set.empty,
         positionInM = 0.0,
         time = plan.startTime)
-      scheduler.schedule(plan.startTime, vehicleEntersRoad(plan, vehicle, plan.startTime))
+      scheduler.schedule(plan.startTime, vehicleEntersRoad(plan, vehicle))
     }
   } yield ()
 
-  private def vehicleEntersRoad(plan: TripPlan, vehicle: Vehicle, time: Double): UIO[Unit] = {
+  private def vehicleEntersRoad(plan: TripPlan, vehicle: Vehicle): UIO[Unit] = {
     if (vehicle.positionInM >= scenario.roadLengthInM)
     // we reached the destination, end up here
       return zio.Console.printLine(s"${vehicle.id} is finished").orDie //todo replace with the EndTravel event
@@ -43,7 +43,6 @@ class MethodVehicleHandler(
       for {
         nextVehicle <- goToPosition(
           nextPosition,
-          time,
           vehicle,
           scenario.speedLimitInMPerS,
           scenario.roadLengthInM,
@@ -64,15 +63,14 @@ class MethodVehicleHandler(
       case Some(station) =>
         for {
           nextVehicle <- goToPosition(station.fillingStation.positionInM,
-            vehicle.time,
             vehicle,
             scenario.speedLimitInMPerS,
             scenario.roadLengthInM,
           )
           _ <- ZIO.when(!nextVehicle.isRunOutOfGas) {
             for {
-              exitFromFillingStation <- station.enter(nextVehicle, nextVehicle.time)
-              _ <- vehicleEntersRoad(plan, exitFromFillingStation.vehicle, exitFromFillingStation.time)
+              vehicleExited <- station.enter(nextVehicle, nextVehicle.time)
+              _ <- vehicleEntersRoad(plan, vehicleExited)
             } yield ()
           }
         } yield ()
@@ -81,7 +79,6 @@ class MethodVehicleHandler(
         for {
           nextVehicle <- goToPosition(
             scenario.roadLengthInM,
-            vehicle.time,
             vehicle,
             scenario.speedLimitInMPerS,
             scenario.roadLengthInM,
@@ -93,7 +90,6 @@ class MethodVehicleHandler(
 
   private def goToPosition(
     positionInM: Double,
-    currentTime: Double,
     vehicle: Vehicle,
     speedLimitInMPerS: Double,
     roadLengthInM: Double,

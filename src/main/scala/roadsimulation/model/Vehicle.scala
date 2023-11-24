@@ -38,7 +38,6 @@ case class Vehicle(
   vehicleType: VehicleType,
   fuelLevelInJoule: Double,
   passengers: Set[Person],
-  personsOnRoad: Seq[Person],
   positionInM: Double,
   time: Double
 ) {

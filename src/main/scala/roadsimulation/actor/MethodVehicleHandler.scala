@@ -44,7 +44,6 @@ class MethodVehicleHandler(
         plan.vehicleType,
         plan.initialFuelLevelInJoule,
         passengers = Set.empty,
-        personsOnRoad = Seq.empty,
         positionInM = 0.0,
         time = plan.startTime)
       scheduler.schedule(plan.startTime, travelCycle(plan, vehicle))
@@ -52,19 +51,19 @@ class MethodVehicleHandler(
   } yield ()
 
   private def travelCycle(plan: TripPlan, vehicle: Vehicle): UIO[Unit] = {
-    val nextPosition = calculatePositionToStartSearchingForFuelStation(vehicle,
+    val searchPosition = calculatePositionToStartSearchingForFuelStation(vehicle,
       plan.startSearchingForFillingStationThresholdInM)
-    val resultVehicle = if (nextPosition <= vehicle.positionInM)
+    val resultVehicle = if (searchPosition <= vehicle.positionInM)
       findFillingStationAndFillVehicle(plan, vehicle)
     else
       for {
         nextVehicle <- goToPosition(
-          nextPosition,
+          searchPosition,
           vehicle,
           scenario.speedLimitInMPerS,
           scenario.roadLengthInM,
         )
-        filledVehicle <- ZIO.when(nextVehicle.positionInM >= nextPosition) {
+        filledVehicle <- ZIO.when(nextVehicle.positionInM >= searchPosition) {
           findFillingStationAndFillVehicle(plan, nextVehicle)
         }
       } yield filledVehicle.getOrElse(nextVehicle)
@@ -121,14 +120,14 @@ class MethodVehicleHandler(
       eventReference => vehicleSpatialIndex.putVehicleChange(vehicle, nextVehicle, eventReference))
       .flatMap {
         case Continuation(time, OnTime) =>
-          vehicleSpatialIndex.removeVehicleMovement(vehicle.id).as(nextVehicle)
+          vehicleSpatialIndex.removeVehicleMovement(vehicle.id)
+            .as(nextVehicle)
         case Continuation(time, Interrupted(person: Person)) =>
-          val actualVehicle = vehicle
-            .driveUntilTime(time, speedLimitInMPerS)
-            .copy(personsOnRoad = person +: vehicle.personsOnRoad)
-          vehicleSpatialIndex.removeVehicleMovement(vehicle.id) *>
-            zio.Console.printLine(s"$actualVehicle interrupted by $person").orDie *>
-            goToPosition(person.positionInM, actualVehicle, speedLimitInMPerS, roadLengthInM)
+          for {
+            _ <- vehicleSpatialIndex.removeVehicleMovement(vehicle.id)
+            actualVehicle = vehicle.driveUntilTime(time, speedLimitInMPerS)
+            _ <- zio.Console.printLine(s"$actualVehicle interrupted by $person").orDie
+          } yield actualVehicle
       }
 
 

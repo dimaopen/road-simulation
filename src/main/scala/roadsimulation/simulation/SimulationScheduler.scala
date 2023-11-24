@@ -43,7 +43,9 @@ object SimulationScheduler:
     (handler: EventHandler[T], cancelHandler: CancelledEventHandler[T, I] = NoCancellingSupposed) {
     def handle(): UIO[Unit] = handler(this.time, this.eventType)
 
-    def cancel(cancelTime: Double, data: I): UIO[Unit] = cancelHandler(this.time, this.eventType, cancelTime, data)
+    def cancel(cancelTime: Double, data: I): UIO[Unit] =
+      // cancelling may happen in an event sequence that happens before this event due to parallelism window
+      cancelHandler(time, eventType, math.max(time, cancelTime), data)
 
     override def toString: String = "SimEvent(%,.3f, %s)".format(time, eventType)
   }
@@ -106,11 +108,13 @@ class SimulationSchedulerImpl(
     if (simEvent.time > endSimulationTime)
       Console.printLine("Outside of simulation end time: " + simEvent).orDie as NoEventReference
     else for {
-      now <- ZIO.succeed(beingProcessed.firstKey().eventTime)
-      _ <- ZIO.when(simEvent.time < now)(ZIO.die(TimeInThePast(now, simEvent)))
+      lowTime <- ZIO.succeed(beingProcessed.firstKey().eventTime)
+      eventRef <- currentEventRef.get
+      currentTime = if !eventRef.eventTime.isNaN then eventRef.eventTime else lowTime
+      _ <- ZIO.when(simEvent.time < currentTime)(ZIO.die(TimeInThePast(lowTime, simEvent)))
       number <- counter.updateAndGet(_ + 1)
       eventKey = EventKey[I](number, simEvent.time)
-      shouldBeProcessed = simEvent.time < now + parallelismWindow
+      shouldBeProcessed = simEvent.time < lowTime + parallelismWindow
       _ <- if (shouldBeProcessed) {
         process(eventKey, simEvent).forkDaemon
       } else {
@@ -133,11 +137,11 @@ class SimulationSchedulerImpl(
               s" Use 'scheduler.schedule(cancelTime, scheduler.cancel(eventRef, data))'. ($eventReference, $data)")
           }
           simEvent <- ZIO.succeed(eventQueue.remove(eventKey).asInstanceOf[SimEvent[?, I]])
-          cancellingEventExists = simEvent != null
-          _ <- ZIO.when(cancellingEventExists) {
+          cancelledEventExists = simEvent != null
+          _ <- ZIO.when(cancelledEventExists) {
             simEvent.cancel(evRef.eventTime, data)
           }
-        } yield cancellingEventExists
+        } yield cancelledEventExists
       case SimulationScheduler.NoEventReference => ZIO.succeed(false)
       case _ => ZIO.dieMessage(s"Unknown eventReference: $eventReference")
 
@@ -192,17 +196,17 @@ class SimulationSchedulerImpl(
     import scala.jdk.CollectionConverters.*
     for {
       nextEventEntry <- ZIO.succeed(beingProcessed.firstEntry())
-      now <- if (nextEventEntry != null)
+      lowTime <- if (nextEventEntry != null)
         ZIO.succeed(nextEventEntry.getKey.eventTime)
       else
         ZIO.succeed {
           val firstQueuedEventEntry = eventQueue.firstEntry()
           if (firstQueuedEventEntry != null) firstQueuedEventEntry.getKey.eventTime else Double.NaN
         }
-      _ <- ZIO.when(now.isNaN)(endPromise.succeed(()))
+      _ <- ZIO.when(lowTime.isNaN)(endPromise.succeed(()))
       eventsToProcess <- ZIO.succeed {
         import scala.jdk.CollectionConverters.*
-        val events = eventQueue.headMap(EventKey(0, now + parallelismWindow))
+        val events = eventQueue.headMap(EventKey(0, lowTime + parallelismWindow))
         val keys = events.keySet().asScala
         keys.foldLeft(IndexedSeq.empty[(EventKey[?], SimEvent[?, ?])]) { case (acc, key) =>
           val event = events.remove(key)

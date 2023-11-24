@@ -62,7 +62,6 @@ class VehicleHandlerImpl(
         plan.vehicleType,
         plan.initialFuelLevelInJoule,
         passengers = Set.empty,
-        personsOnRoad = Seq.empty,
         positionInM = 0.0,
         time = plan.startTime),
         entersRoad = true)

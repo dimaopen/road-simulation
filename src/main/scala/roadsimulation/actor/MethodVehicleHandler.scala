@@ -47,18 +47,15 @@ class MethodVehicleHandler(
         personsOnRoad = Seq.empty,
         positionInM = 0.0,
         time = plan.startTime)
-      scheduler.schedule(plan.startTime, vehicleEntersRoad(plan, vehicle))
+      scheduler.schedule(plan.startTime, travelCycle(plan, vehicle))
     }
   } yield ()
 
-  private def vehicleEntersRoad(plan: TripPlan, vehicle: Vehicle): UIO[Unit] = {
-    if (vehicle.positionInM >= scenario.roadLengthInM)
-    // we reached the destination, end up here
-      return zio.Console.printLine(s"${vehicle.id} is finished").orDie //todo replace with the EndTravel event
+  private def travelCycle(plan: TripPlan, vehicle: Vehicle): UIO[Unit] = {
     val nextPosition = calculatePositionToStartSearchingForFuelStation(vehicle,
       plan.startSearchingForFillingStationThresholdInM)
-    if (nextPosition <= vehicle.positionInM)
-      findFillingStation(plan, vehicle)
+    val resultVehicle = if (nextPosition <= vehicle.positionInM)
+      findFillingStationAndFillVehicle(plan, vehicle)
     else
       for {
         nextVehicle <- goToPosition(
@@ -67,18 +64,28 @@ class MethodVehicleHandler(
           scenario.speedLimitInMPerS,
           scenario.roadLengthInM,
         )
-        _ <- ZIO.when(nextVehicle.positionInM >= nextPosition) {
-          findFillingStation(plan, nextVehicle)
+        filledVehicle <- ZIO.when(nextVehicle.positionInM >= nextPosition) {
+          findFillingStationAndFillVehicle(plan, nextVehicle)
         }
-
-      } yield ()
+      } yield filledVehicle.getOrElse(nextVehicle)
+    resultVehicle.map {
+      case vehicle if vehicle.positionInM >= scenario.roadLengthInM =>
+        // we reached the destination, end up here
+        //todo replace with the EndTravel event
+        zio.Console.printLine(s"${vehicle.id} is finished").orDie
+      case vehicle if vehicle.isRunOutOfGas =>
+        zio.Console.printLine(s"${vehicle} is finished with ROOG").orDie
+      case vehicle =>
+        //continue travelling
+        travelCycle(plan, vehicle)
+    }
 
   }
 
-  private def findFillingStation(
+  private def findFillingStationAndFillVehicle(
     plan: TripPlan,
     vehicle: Vehicle
-  ) = {
+  ): UIO[Vehicle] = {
     fillingStationHandler.findNearestStationAfter(vehicle.positionInM) match
       case Some(station) =>
         for {
@@ -87,24 +94,18 @@ class MethodVehicleHandler(
             scenario.speedLimitInMPerS,
             scenario.roadLengthInM,
           )
-          _ <- ZIO.when(!nextVehicle.isRunOutOfGas) {
-            for {
-              vehicleExited <- station.enter(nextVehicle, nextVehicle.time)
-              _ <- vehicleEntersRoad(plan, vehicleExited)
-            } yield ()
+          filledVehicle <- ZIO.when (nextVehicle.positionInM >= station.fillingStation.positionInM) {
+            station.enter(nextVehicle, nextVehicle.time)
           }
-        } yield ()
+        } yield filledVehicle.getOrElse(nextVehicle)
 
       case None =>
-        for {
-          nextVehicle <- goToPosition(
-            scenario.roadLengthInM,
-            vehicle,
-            scenario.speedLimitInMPerS,
-            scenario.roadLengthInM,
-          )
-        } yield ()
-
+        goToPosition(
+          scenario.roadLengthInM,
+          vehicle,
+          scenario.speedLimitInMPerS,
+          scenario.roadLengthInM,
+        )
   }
 
 
@@ -120,12 +121,7 @@ class MethodVehicleHandler(
       eventReference => vehicleSpatialIndex.putVehicleChange(vehicle, nextVehicle, eventReference))
       .flatMap {
         case Continuation(time, OnTime) =>
-          vehicleSpatialIndex.removeVehicleMovement(vehicle.id) *>
-            ZIO.when(nextVehicle.isRunOutOfGas) {
-              zio.Console.printLine(s"${nextVehicle} is finished with ROOG").orDie
-            } *> ZIO.when(nextVehicle.positionInM >= roadLengthInM) {
-            zio.Console.printLine(s"${vehicle} is finished").orDie
-          }.as(nextVehicle)
+          vehicleSpatialIndex.removeVehicleMovement(vehicle.id).as(nextVehicle)
         case Continuation(time, Interrupted(person: Person)) =>
           val actualVehicle = vehicle
             .driveUntilTime(time, speedLimitInMPerS)

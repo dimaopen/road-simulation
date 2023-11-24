@@ -119,7 +119,7 @@ class SimulationSchedulerImpl(
     } yield eventKey
 
 
-  def schedule[I](time: Double, handler: => UIO[Unit]): UIO[EventReference[I]] = {
+  override def schedule[I](time: Double, handler: => UIO[Unit]): UIO[EventReference[I]] = {
     schedule(SimEvent(time, ())((_, _) => handler, NoCancellingSupposed))
   }
 

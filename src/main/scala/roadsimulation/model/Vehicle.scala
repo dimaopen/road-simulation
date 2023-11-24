@@ -38,6 +38,7 @@ case class Vehicle(
   vehicleType: VehicleType,
   fuelLevelInJoule: Double,
   passengers: Set[Person],
+  personsOnRoad: Seq[Person],
   positionInM: Double,
   time: Double
 ) {
@@ -55,6 +56,11 @@ case class Vehicle(
     this.copy(positionInM = positionInM + travelDistance,
       fuelLevelInJoule = fuelLevelAfterTraveling(travelDistance),
       time = nextTime)
+
+  def driveUntilTime(toTime: Double, speedLimitInMPerS: Double): Vehicle =
+    val speed: Double = vehicleType.maxVelocity.fold(speedLimitInMPerS)(math.min(speedLimitInMPerS, _))
+    val toPositionInM = positionInM + (toTime - time) * speed
+    drive(toPositionInM, speedLimitInMPerS)
 
   override def toString: String = "%s(%s; %.2fm, %.2fs; range = %.0f; %s=%,.0f)".format(vehicleType.id,
     id,

@@ -50,7 +50,7 @@ class FillingStationObject(
 ):
   def enter(vehicle: Vehicle, enterTime: Double): UIO[Vehicle] = {
     val ttf = timeToFill(vehicle)
-    scheduler.continueWhen(enterTime + ttf, Some(vehicle))
+    scheduler.continueWhen(enterTime + ttf)
       .map { case Continuation(time, _) =>
         val addedFuel = caclAddedFuel(vehicle, time - enterTime)
         vehicle.copy(fuelLevelInJoule = vehicle.fuelLevelInJoule + addedFuel, time = time)

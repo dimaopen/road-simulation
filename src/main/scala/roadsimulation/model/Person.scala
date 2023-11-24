@@ -13,7 +13,10 @@ case class Person(
   time: Double,
   money: Double,
   plan: PersonPlan
-)
+):
+  override def toString: String = s"$id, $age yo, $gender, $positionInM m, $time s"
+  
+end Person
 
 object Person:
   enum Gender:

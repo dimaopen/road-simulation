@@ -1,6 +1,6 @@
 package roadsimulation.actor
 
-import roadsimulation.model.{Id, Scenario, SpaceTime, TripPlan, Vehicle}
+import roadsimulation.model.{Id, Person, Scenario, SpaceTime, TripPlan, Vehicle}
 import roadsimulation.actor.RoadEventType.*
 import roadsimulation.actor.VehicleHandlerImpl.calculatePositionToStartSearchingForFuelStation
 import roadsimulation.simulation.SimulationScheduler
@@ -9,11 +9,17 @@ import zio.UIO
 import zio.ZIO
 
 import java.util.concurrent.ConcurrentHashMap
+import scala.collection.concurrent.TrieMap
 
 /**
  * @author Dmitry Openkov
  */
-trait VehicleHandler
+trait VehicleHandler:
+  def getAllApproachingVehicles(time: Double, position: Double): UIO[Seq[(Movement, Double)]]
+
+  def takePassenger(vehicleId: Id[TripPlan], personId: Id[Person]): UIO[Seq[Id[Person]]]
+
+end VehicleHandler
 
 class VehicleHandlerImpl(
   scenario: Scenario,
@@ -23,7 +29,22 @@ class VehicleHandlerImpl(
 
   private val vehicleSpatialIndex = new VehicleSpatialIndex
 
-  def initialEvents(scenario: Scenario): UIO[IndexedSeq[SimEvent[VehicleContinueTraveling, Unit]]] = ZIO.succeed(
+  override def getAllApproachingVehicles(
+    time: Double,
+    position: Double
+  ): UIO[Seq[(Movement, Double)]] = vehicleSpatialIndex.getAllApproachingVehicles(time, position)
+
+  private val passengers = TrieMap.empty[Id[TripPlan], Seq[Id[Person]]]
+
+  override def takePassenger(vehicleId: Id[TripPlan], personId: Id[Person]): UIO[Seq[Id[Person]]] = {
+    ZIO.succeed(passengers.updateWith(vehicleId) {
+      case Some(passengerList) if passengerList.contains(personId) => throw new IllegalArgumentException()
+      case Some(passengerList) => Some(passengerList :+ personId)
+      case None => Some(Seq(personId))
+    }.get)
+  }
+
+  def initialEvents(scenario: Scenario): UIO[IndexedSeq[SimEvent[VehicleContinueTraveling, Nothing]]] = ZIO.succeed(
     scenario.tripPlans.values.map(initialEventFromPlan).toIndexedSeq
   )
 
@@ -37,7 +58,13 @@ class VehicleHandlerImpl(
   private def initialEventFromPlan(plan: TripPlan) = {
     SimEvent(
       plan.startTime,
-      VehicleContinueTraveling(Vehicle(plan.id, plan.vehicleType, plan.initialFuelLevelInJoule, passengers = Set.empty, positionInM = 0.0, time = plan.startTime),
+      VehicleContinueTraveling(Vehicle(plan.id,
+        plan.vehicleType,
+        plan.initialFuelLevelInJoule,
+        passengers = Set.empty,
+        personsOnRoad = Seq.empty,
+        positionInM = 0.0,
+        time = plan.startTime),
         entersRoad = true)
     )(handleContinueTraveling)
   }
@@ -101,8 +128,8 @@ class VehicleHandlerImpl(
     else
       SimEvent(nextVehicle.time, VehicleAtPosition(nextVehicle, obj))(handleVehicleAtPosition)
     for {
-      _ <- scheduler.schedule(nextEvent)
-      _ <- vehicleSpatialIndex.putVehicleChange(vehicle, currentTime, nextEvent.eventType.vehicle, nextEvent.time)
+      eventReference <- scheduler.schedule(nextEvent)
+      _ <- vehicleSpatialIndex.putVehicleChange(vehicle, nextEvent.eventType.vehicle, eventReference)
     } yield ()
 
 
@@ -118,26 +145,42 @@ object VehicleHandlerImpl {
       vehicle.positionInM + travelDistance
 }
 
-case class Movement(t1: Double, p1: Double, t2: Double, p2: Double):
+case class Movement(vehicle1: Vehicle, vehicle2: Vehicle, eventReference: EventReference[Person]):
   def intersectionTime(t: Double, p: Double): Double =
-    if (p < p1 || p2 < p || t < t1 || t > t2)
+    if (p < vehicle1.positionInM || vehicle2.positionInM < p || t < vehicle1.time || t > vehicle2.time)
       Double.NaN
     else {
-      val result = (p - p1) * (t2 - t1) / (p2 - p1) + t1
+      val result = (p - vehicle1.positionInM) * (vehicle2.time - vehicle1.time) /
+        (vehicle2.positionInM - vehicle1.positionInM) + vehicle1.time
       if result >= t then result else Double.NaN
     }
 
 end Movement
 
 class VehicleSpatialIndex:
+  // todo: we should use a navigable map here to reduce the number of vehicles being considered
   private val vehicleToPosition = new ConcurrentHashMap[Id[TripPlan], Movement]()
 
-  def putVehicleChange(initialState: Vehicle, initialTime: Double, finalState: Vehicle, finalTime: Double): UIO[Unit] =
+  def putVehicleChange(initialState: Vehicle, finalState: Vehicle, eventReference: EventReference[Person]): UIO[Unit] =
     ZIO.succeed(vehicleToPosition.put(initialState.id,
-      Movement(initialTime, initialState.positionInM, finalTime, finalState.positionInM)))
+      Movement(initialState, finalState, eventReference)))
 
-  def getAllApproachingVehicles(time: Double, position: Double): UIO[Seq[Id[TripPlan]]] = {
-    ZIO.succeed(vehicleToPosition.reduce(32, (id, movement) => if (movement.intersectionTime(time, position).isFinite) Seq(id) else null, _ ++ _))
+  def removeVehicleMovement(vehicleId: Id[TripPlan]): UIO[Unit] =
+    ZIO.succeed(vehicleToPosition.remove(vehicleId))
+
+  def getAllApproachingVehicles(time: Double, position: Double): UIO[Seq[(Movement, Double)]] = {
+    ZIO.succeed {
+      val result: Seq[(Movement, Double)] = vehicleToPosition.reduceValues(32,
+        movement => {
+          val intersectionTime = movement.intersectionTime(time, position)
+          if (intersectionTime.isFinite) Seq((movement, intersectionTime)) else null
+        },
+        _ ++ _)
+      if (result == null)
+        Seq.empty
+      else
+        result
+    }
   }
 
 end VehicleSpatialIndex

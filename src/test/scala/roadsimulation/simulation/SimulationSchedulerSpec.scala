@@ -4,6 +4,7 @@ import org.junit.runner.RunWith
 import roadsimulation.actor.{FillingStationHandler, RoadEventType, VehicleHandlerImpl}
 import roadsimulation.model.FuelType.{Diesel, Gasoline}
 import roadsimulation.model.*
+import roadsimulation.simulation.SimulationSchedulerSpec.scenarioWithOneCar
 import zio.ZIO
 import zio.test.*
 import zio.test.junit.JUnitRunnableSpec
@@ -16,7 +17,7 @@ class SimulationSchedulerSpec extends JUnitRunnableSpec {
     test("simulation happens correctly") {
       for {
         scheduler <- SimulationScheduler.make(30, Double.PositiveInfinity)
-        scenario = scenarioWithOneCar()
+        scenario = scenarioWithOneCar
         fillingStationHandler <- FillingStationHandler.make(scenario, scheduler)
         vehicleHandler = new VehicleHandlerImpl(scenario, scheduler, fillingStationHandler)
         initialEvents <- vehicleHandler.initialEvents(scenario)
@@ -26,8 +27,10 @@ class SimulationSchedulerSpec extends JUnitRunnableSpec {
 
     }
   )
+}
 
-  private def scenarioWithOneCar(): Scenario = {
+object SimulationSchedulerSpec:
+  def scenarioWithOneCar: Scenario = {
     val plans = Seq(TripPlan(Id("140"), vehicleTypeCar(),
       initialFuelLevelInJoule = 1.0203336632572643E10,
       startTime = 16197,
@@ -36,7 +39,7 @@ class SimulationSchedulerSpec extends JUnitRunnableSpec {
     Scenario(600_000.0, 100, 86400 * 2, fillingStations(), Map.empty, plans.groupMapReduce(_.id)(identity)((a, _) => a))
   }
 
-  private def vehicleTypeCar(): VehicleType = {
+  def vehicleTypeCar(): VehicleType = {
     VehicleType(
       Id("Car"),
       seatingCapacity = 4,
@@ -48,7 +51,7 @@ class SimulationSchedulerSpec extends JUnitRunnableSpec {
     )
   }
 
-  private def fillingStations(): Map[Id[FillingStation], FillingStation] = {
+  def fillingStations(): Map[Id[FillingStation], FillingStation] = {
     Seq(
       FillingStation(Id("Sibneft-1"), 100, IndexedSeq.fill(6)(Set(Gasoline, Diesel)), Map.empty),
       FillingStation(Id("Lukoil-1"), 200, IndexedSeq.fill(6)(Set(Gasoline, Diesel)), Map.empty),
@@ -58,5 +61,4 @@ class SimulationSchedulerSpec extends JUnitRunnableSpec {
       FillingStation(Id("Lukoil-2"), 550, IndexedSeq.fill(6)(Set(Gasoline, Diesel)), Map.empty)
     ).groupMapReduce(_.id)(identity)((a, _) => a)
   }
-
-}
+end SimulationSchedulerSpec

@@ -67,7 +67,7 @@ class MethodVehicleHandler(
           findFillingStationAndFillVehicle(plan, nextVehicle)
         }
       } yield filledVehicle.getOrElse(nextVehicle)
-    resultVehicle.map {
+    resultVehicle.flatMap {
       case vehicle if vehicle.positionInM >= scenario.roadLengthInM =>
         // we reached the destination, end up here
         //todo replace with the EndTravel event

@@ -1,13 +1,13 @@
 package roadsimulation.actor
 
+import roadsimulation.model.{>=~, Id, Person, PositionKey, Scenario, TripPlan, Vehicle}
 import roadsimulation.actor.RoadEventType.{RunOutOfGas, VehicleAtPosition, VehicleContinueTraveling}
 import roadsimulation.actor.VehicleHandlerImpl.calculatePositionToStartSearchingForFuelStation
-import roadsimulation.model.{Id, Person, Scenario, TripPlan, Vehicle}
 import roadsimulation.simulation.SimulationScheduler
-import roadsimulation.simulation.SimulationScheduler.{Interrupted, OnTime}
-import roadsimulation.simulation.SimulationScheduler.{Continuation, ContinuationStatus, SimEvent}
+import roadsimulation.simulation.SimulationScheduler.{Continuation, ContinuationStatus, EventReference, Interrupted, OnTime, SimEvent}
 import zio.{Exit, UIO, ZIO}
 
+import java.util.concurrent.ConcurrentSkipListMap
 import scala.collection.concurrent.TrieMap
 
 /**
@@ -16,7 +16,8 @@ import scala.collection.concurrent.TrieMap
 class MethodVehicleHandler(
   scenario: Scenario,
   scheduler: SimulationScheduler,
-  fillingStationHandler: FillingStationHandler
+  fillingStationHandler: FillingStationHandler,
+  personsOnRoad: ConcurrentSkipListMap[PositionKey[Person], (Person, EventReference[Vehicle])],
 ) extends VehicleHandler:
 
   private val vehicleSpatialIndex = new VehicleSpatialIndex
@@ -43,7 +44,7 @@ class MethodVehicleHandler(
       val vehicle = Vehicle(plan.id,
         plan.vehicleType,
         plan.initialFuelLevelInJoule,
-        passengers = Set.empty,
+        passengers = Seq.empty,
         positionInM = 0.0,
         time = plan.startTime)
       scheduler.schedule(plan.startTime, travelCycle(plan, vehicle))
@@ -63,17 +64,17 @@ class MethodVehicleHandler(
           scenario.speedLimitInMPerS,
           scenario.roadLengthInM,
         )
-        filledVehicle <- ZIO.when(nextVehicle.positionInM >= searchPosition) {
+        filledVehicle <- ZIO.when(nextVehicle.positionInM >=~ searchPosition) {
           findFillingStationAndFillVehicle(plan, nextVehicle)
         }
       } yield filledVehicle.getOrElse(nextVehicle)
     resultVehicle.flatMap {
-      case vehicle if vehicle.positionInM >= scenario.roadLengthInM =>
+      case vehicle if vehicle.positionInM >=~ scenario.roadLengthInM =>
         // we reached the destination, end up here
         //todo replace with the EndTravel event
-        zio.Console.printLine(s"${vehicle.id} is finished").orDie
+        zio.Console.printLine(s"$vehicle is finished").orDie
       case vehicle if vehicle.isRunOutOfGas =>
-        zio.Console.printLine(s"${vehicle} is finished with ROOG").orDie
+        zio.Console.printLine(s"$vehicle is finished with ROOG").orDie
       case vehicle =>
         //continue travelling
         travelCycle(plan, vehicle)
@@ -93,7 +94,7 @@ class MethodVehicleHandler(
             scenario.speedLimitInMPerS,
             scenario.roadLengthInM,
           )
-          filledVehicle <- ZIO.when (nextVehicle.positionInM >= station.fillingStation.positionInM) {
+          filledVehicle <- ZIO.when(nextVehicle.positionInM >=~ station.fillingStation.positionInM) {
             station.enter(nextVehicle, nextVehicle.time)
           }
         } yield filledVehicle.getOrElse(nextVehicle)
@@ -114,14 +115,30 @@ class MethodVehicleHandler(
     speedLimitInMPerS: Double,
     roadLengthInM: Double,
   ): UIO[Vehicle] =
-    val nextPosition = math.min(positionInM, scenario.roadLengthInM)
+    val targetPosition = math.min(positionInM, scenario.roadLengthInM)
+    val nextPerson = Option(personsOnRoad.ceilingEntry(PositionKey.minKeyForPosition(vehicle.positionInM)))
+      .map(_.getValue)
+      .filter { case (person, _) => person.positionInM < targetPosition }
+    val nextPosition = nextPerson.fold(targetPosition) { case (person, _) => person.positionInM }
     val nextVehicle = vehicle.drive(nextPosition, speedLimitInMPerS)
     scheduler.continueWhen[Person](nextVehicle.time,
       eventReference => vehicleSpatialIndex.putVehicleChange(vehicle, nextVehicle, eventReference))
       .flatMap {
         case Continuation(time, OnTime) =>
-          vehicleSpatialIndex.removeVehicleMovement(vehicle.id)
-            .as(nextVehicle)
+          for {
+            _ <- vehicleSpatialIndex.removeVehicleMovement(vehicle.id)
+            finalVehicle <- ZIO.when(nextPerson.isDefined) {
+              val (person, eventRef) = nextPerson.get
+              for {
+                cancelled <- scheduler.cancel(eventRef, nextVehicle)
+                veh = if cancelled then
+                  nextVehicle.copy(passengers = nextVehicle.passengers :+ person)
+                else
+                  nextVehicle
+                finVeh <- goToPosition(targetPosition, veh, speedLimitInMPerS, roadLengthInM)
+              } yield finVeh
+            }
+          } yield finalVehicle.getOrElse(nextVehicle)
         case Continuation(time, Interrupted(person: Person)) =>
           for {
             _ <- vehicleSpatialIndex.removeVehicleMovement(vehicle.id)

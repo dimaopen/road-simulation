@@ -17,7 +17,7 @@ class CommonActorSpec extends AnyWordSpec with Matchers {
       val vehicle = Vehicle(plan.id,
         plan.vehicleType,
         plan.initialFuelLevelInJoule,
-        passengers = Set.empty,
+        passengers = Seq.empty,
         positionInM = 1.0,
         time = 2)
       val nextVehiclePosition = vehicle.copy(positionInM = 5, time = 4)

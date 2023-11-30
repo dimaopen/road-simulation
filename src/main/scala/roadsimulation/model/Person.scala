@@ -2,6 +2,8 @@ package roadsimulation.model
 
 import roadsimulation.model.Person.Gender
 
+import java.util.Comparator
+
 /**
  * @author Dmitry Openkov
  */
@@ -14,7 +16,7 @@ case class Person(
   money: Double,
   plan: PersonPlan
 ):
-  override def toString: String = s"$id, $age yo, $gender, $positionInM m, $time s"
+  override def toString: String = s"$gender($id, $age yo, $positionInM m, $time s)"
   
 end Person
 

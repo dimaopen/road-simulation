@@ -1,6 +1,6 @@
 package roadsimulation.actor
 
-import roadsimulation.model.{Id, Person, Scenario, SpaceTime, TripPlan, Vehicle}
+import roadsimulation.model.{Id, Person, Scenario, TripPlan, Vehicle}
 import roadsimulation.actor.RoadEventType.*
 import roadsimulation.actor.VehicleHandlerImpl.calculatePositionToStartSearchingForFuelStation
 import roadsimulation.simulation.SimulationScheduler
@@ -61,7 +61,7 @@ class VehicleHandlerImpl(
       VehicleContinueTraveling(Vehicle(plan.id,
         plan.vehicleType,
         plan.initialFuelLevelInJoule,
-        passengers = Set.empty,
+        passengers = Seq.empty,
         positionInM = 0.0,
         time = plan.startTime),
         entersRoad = true)

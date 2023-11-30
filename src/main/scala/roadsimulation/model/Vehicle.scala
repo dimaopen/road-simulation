@@ -37,7 +37,7 @@ case class Vehicle(
   id: Id[TripPlan],
   vehicleType: VehicleType,
   fuelLevelInJoule: Double,
-  passengers: Set[Person],
+  passengers: Seq[Person],
   positionInM: Double,
   time: Double
 ) {
@@ -61,7 +61,7 @@ case class Vehicle(
     val toPositionInM = positionInM + (toTime - time) * speed
     drive(toPositionInM, speedLimitInMPerS)
 
-  override def toString: String = "%s(%s; %.2fm, %.2fs; range = %.0f; %s=%,.0f)".format(vehicleType.id,
+  override def toString: String = s"%s(%s; %.2fm, %.2fs; range = %.0f; %s=%,.0f, ${passengers.map(_.id).mkString("|")})".format(vehicleType.id,
     id,
     positionInM,
     time,
@@ -69,5 +69,3 @@ case class Vehicle(
     vehicleType.fuelType,
     fuelLevelInJoule)
 }
-
-case class SpaceTime(positionInM: Double, time: Double)

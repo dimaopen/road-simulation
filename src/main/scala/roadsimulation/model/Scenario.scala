@@ -11,11 +11,6 @@ import java.nio.file.{Path, Paths}
 /**
  * @author Dmitry Openkov
  */
-opaque type Id[T] = String
-object Id:
-  def apply[T](id: String): Id[T] = id
-end Id
-
 case class Scenario(
   roadLengthInM: Double,
   speedLimitInKmPerHour: Double,

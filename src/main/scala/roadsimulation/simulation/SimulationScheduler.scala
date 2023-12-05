@@ -44,7 +44,7 @@ object SimulationScheduler:
     def handle(): UIO[Unit] = handler(this.time, this.eventType)
 
     def cancel(cancelTime: Double, data: I): UIO[Unit] =
-      // cancelling may happen in an event sequence that happens before this event due to parallelism window
+    // cancelling may happen in an event sequence that happens before this event due to parallelism window
       cancelHandler(time, eventType, math.max(time, cancelTime), data)
 
     override def toString: String = "SimEvent(%,.3f, %s)".format(time, eventType)
@@ -65,7 +65,11 @@ object SimulationScheduler:
   case class TimeInThePast(
     now: Double,
     event: SimEvent[?, ?],
-  ) extends Exception(s"Time in the past: ${event.time}, now is $now, eventType = ${event.eventType}")
+  ) extends Exception(s"Time is in the past: ${event.time}, now is $now, eventType = ${event.eventType}")
+
+  case class TimeIsNotDefined(
+    event: SimEvent[?, ?],
+  ) extends Exception(s"Time is not defined for event $event")
 
   sealed trait ContinuationStatus[+I]
 
@@ -104,9 +108,11 @@ class SimulationSchedulerImpl(
   endSimulationTime: Double,
 ) extends SimulationScheduler:
 
+  def eventQueueSize: UIO[Int] = ZIO.succeed(eventQueue.size())
+
   override def schedule[T, I](simEvent: SimEvent[T, I]): UIO[EventReference[I]] =
-    if (simEvent.time > endSimulationTime)
-      Console.printLine("Outside of simulation end time: " + simEvent).orDie as NoEventReference
+    if (simEvent.time.isNaN)
+      ZIO.die(TimeIsNotDefined(simEvent))
     else for {
       lowTime <- ZIO.succeed(beingProcessed.firstKey().eventTime)
       eventRef <- currentEventRef.get
@@ -201,19 +207,22 @@ class SimulationSchedulerImpl(
       else
         ZIO.succeed {
           val firstQueuedEventEntry = eventQueue.firstEntry()
-          if (firstQueuedEventEntry != null) firstQueuedEventEntry.getKey.eventTime else Double.NaN
+          if (firstQueuedEventEntry != null) firstQueuedEventEntry.getKey.eventTime else Double.PositiveInfinity
         }
-      _ <- ZIO.when(lowTime.isNaN)(endPromise.succeed(()))
-      eventsToProcess <- ZIO.succeed {
-        import scala.jdk.CollectionConverters.*
-        val events = eventQueue.headMap(EventKey(0, lowTime + parallelismWindow))
-        val keys = events.keySet().asScala
-        keys.foldLeft(IndexedSeq.empty[(EventKey[?], SimEvent[?, ?])]) { case (acc, key) =>
-          val event = events.remove(key)
-          if (event == null) acc
-          else acc :+ (key, event)
+      eventsToProcess <- if lowTime >= endSimulationTime then
+        endPromise.succeed(())
+          .as(Seq.empty[(EventKey[?], SimEvent[?, ?])])
+      else
+        ZIO.succeed {
+          import scala.jdk.CollectionConverters.*
+          val events = eventQueue.headMap(EventKey(0, lowTime + parallelismWindow))
+          val keys = events.keySet().asScala
+          keys.foldLeft(IndexedSeq.empty[(EventKey[?], SimEvent[?, ?])]) { case (acc, key) =>
+            val event = events.remove(key)
+            if (event == null) acc
+            else acc :+ (key, event)
+          }
         }
-      }
       _ <- ZIO.foreach(eventsToProcess) { case (eventKey, event) => process(eventKey, event).forkDaemon }
     } yield ()
 

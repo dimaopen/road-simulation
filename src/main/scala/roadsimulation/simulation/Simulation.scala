@@ -22,10 +22,11 @@ object Simulation {
         personHandler = new PersonHandler(scenario, vehicleHandler, personsOnRoad, scheduler)
         _ <- vehicleHandler.scheduleInitialEvents(scenario)
         _ <- personHandler.scheduleInitialEvents(scenario)
-        start <- zio.Clock.currentTime(TimeUnit.SECONDS)
+        start <- zio.Clock.currentTime(TimeUnit.MILLISECONDS)
         _ <- scheduler.startScheduling()
-        end <- zio.Clock.currentTime(TimeUnit.SECONDS)
-        _ <- Console.printLine(end - start).orDie
+        end <- zio.Clock.currentTime(TimeUnit.MILLISECONDS)
+        eventsBeyondSimEndTime <- scheduler.eventQueueSize
+        _ <- Console.printLine(s"Simulation took ${end - start} ms, queue still contains $eventsBeyondSimEndTime events").orDie
       } yield ()
 
     }

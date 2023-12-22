@@ -19,8 +19,26 @@ trait SimulationScheduler:
 
   def schedule[I](time: Double, handler: => UIO[Unit]): UIO[EventReference[I]]
 
+  /**
+   * Cancel an event
+   * @param eventReference the reference to the even being cancelled
+   * @param data a data object to be passed to the cancel handler of the cancelled event
+   * @tparam I the type of the data object
+   * @return a Boolean indicating that the the event was really cancelled. An event may not be cancelled in case
+   *         it has already happened (has been processed by the scheduler)
+   */
   def cancel[I](eventReference: EventReference[I], data: I): UIO[Boolean]
 
+  /**
+   * This method is a (maybe better) alternative to event scheduling. It holds the current fiber execution until
+   * simulation `time` is.  
+   * @param time the time until the current fiber is hold
+   * @param onHold a callback function that can be used to get the event reference 
+   *               (for cancelling of this hold if needed) 
+   * @tparam I The data type that is expected to be provided at cancelling
+   * @return an object that contains the current time (at the moment of continuation of the fiber execution)
+   *         and the continuation status (OnTime or Interrupted)
+   */
   def continueWhen[I](
     time: Double,
     onHold: EventReference[I] => UIO[Unit] = (_: EventReference[I]) => ZIO.unit
@@ -133,7 +151,7 @@ class SimulationSchedulerImpl(
     schedule(SimEvent(time, ())((_, _) => handler, NoCancellingSupposed))
   }
 
-  override def cancel[I](eventReference: EventReference[I], data: I): UIO[Boolean] = {
+  override def cancel[I](eventReference: EventReference[I], data: I): UIO[Boolean] =
     eventReference match
       case eventKey: EventKey[?] =>
         for {
@@ -150,8 +168,6 @@ class SimulationSchedulerImpl(
         } yield cancelledEventExists
       case SimulationScheduler.NoEventReference => ZIO.succeed(false)
       case _ => ZIO.dieMessage(s"Unknown eventReference: $eventReference")
-
-  }
 
   override def continueWhen[I](time: Double, onHold: EventReference[I] => UIO[Unit]): UIO[Continuation[I]] =
     for {
@@ -181,7 +197,7 @@ class SimulationSchedulerImpl(
         } yield ()
       }
       }))
-      // call the user function indicating that
+      // call the user function providing the event reference
       _ <- onHold(eventRef)
       // now we remove the event that triggered this fiber execution to allow the simulation continue
       _ <- removeEventAndContinue(myEventKey)

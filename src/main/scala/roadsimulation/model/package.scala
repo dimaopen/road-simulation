@@ -8,6 +8,7 @@ package roadsimulation.model
 opaque type Id[T] = String
 object Id:
   def apply[T](id: String): Id[T] = id
+  def empty[T]: Id[T] = ""
 end Id
 
 case class PositionKey[T](position: Double, time: Double, id: Id[T])

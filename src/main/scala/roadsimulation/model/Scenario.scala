@@ -17,7 +17,7 @@ case class Scenario(
   endTime: Int,
   fillingStations: Map[Id[FillingStation], FillingStation],
   persons: Map[Id[Person], Person],
-  tripPlans: Map[Id[TripPlan], TripPlan]
+  tripPlans: Map[Id[Vehicle], TripPlan]
 ) {
   val speedLimitInMPerS: Double = speedLimitInKmPerHour / 3.6
 }
@@ -55,7 +55,7 @@ object Scenario {
     startTime: Int,
     endTime: Int,
     seed: Int
-  ): UIO[Map[Id[TripPlan], TripPlan]] = {
+  ): UIO[Map[Id[Vehicle], TripPlan]] = {
     def createTripPlan(idNum: Int): UIO[TripPlan] = for {
       typeNum <- Random.nextIntBounded(vehicleTypes.size)
       vehicleType = vehicleTypes(typeNum)

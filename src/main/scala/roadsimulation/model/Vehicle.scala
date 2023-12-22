@@ -26,7 +26,7 @@ case class VehicleType(
 )
 
 case class TripPlan(
-  id: Id[TripPlan],
+  id: Id[Vehicle],
   vehicleType: VehicleType,
   initialFuelLevelInJoule: Double,
   startTime: Double,
@@ -34,7 +34,7 @@ case class TripPlan(
 )
 
 case class Vehicle(
-  id: Id[TripPlan],
+  id: Id[Vehicle],
   vehicleType: VehicleType,
   fuelLevelInJoule: Double,
   passengers: Seq[Person],

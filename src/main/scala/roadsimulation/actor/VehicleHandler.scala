@@ -17,7 +17,7 @@ import scala.collection.concurrent.TrieMap
 trait VehicleHandler:
   def getAllApproachingVehicles(time: Double, position: Double): UIO[Seq[(Movement, Double)]]
 
-  def takePassenger(vehicleId: Id[TripPlan], personId: Id[Person]): UIO[Seq[Id[Person]]]
+  def takePassenger(vehicleId: Id[Vehicle], personId: Id[Person]): UIO[Seq[Id[Person]]]
 
 end VehicleHandler
 
@@ -34,9 +34,9 @@ class VehicleHandlerImpl(
     position: Double
   ): UIO[Seq[(Movement, Double)]] = vehicleSpatialIndex.getAllApproachingVehicles(time, position)
 
-  private val passengers = TrieMap.empty[Id[TripPlan], Seq[Id[Person]]]
+  private val passengers = TrieMap.empty[Id[Vehicle], Seq[Id[Person]]]
 
-  override def takePassenger(vehicleId: Id[TripPlan], personId: Id[Person]): UIO[Seq[Id[Person]]] = {
+  override def takePassenger(vehicleId: Id[Vehicle], personId: Id[Person]): UIO[Seq[Id[Person]]] = {
     ZIO.succeed(passengers.updateWith(vehicleId) {
       case Some(passengerList) if passengerList.contains(personId) => throw new IllegalArgumentException()
       case Some(passengerList) => Some(passengerList :+ personId)
@@ -158,13 +158,13 @@ end Movement
 
 class VehicleSpatialIndex:
   // todo: we should use a navigable map here to reduce the number of vehicles being considered
-  private val vehicleToPosition = new ConcurrentHashMap[Id[TripPlan], Movement]()
+  private val vehicleToPosition = new ConcurrentHashMap[Id[Vehicle], Movement]()
 
   def putVehicleChange(initialState: Vehicle, finalState: Vehicle, eventReference: EventReference[Person]): UIO[Unit] =
     ZIO.succeed(vehicleToPosition.put(initialState.id,
       Movement(initialState, finalState, eventReference)))
 
-  def removeVehicleMovement(vehicleId: Id[TripPlan]): UIO[Unit] =
+  def removeVehicleMovement(vehicleId: Id[Vehicle]): UIO[Unit] =
     ZIO.succeed(vehicleToPosition.remove(vehicleId))
 
   def getAllApproachingVehicles(time: Double, position: Double): UIO[Seq[(Movement, Double)]] = {

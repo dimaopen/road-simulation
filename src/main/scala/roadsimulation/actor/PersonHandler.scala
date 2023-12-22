@@ -1,12 +1,11 @@
 package roadsimulation.actor
 
 
-import roadsimulation.model.{Id, Person, PositionKey, Scenario, TripPlan, Vehicle}
+import roadsimulation.model.{Id, Person, PersonGotToRoad, PositionKey, Scenario, StoredRoadEvent, TripPlan, Vehicle}
 import roadsimulation.actor.RoadEventType.*
 import roadsimulation.simulation.SimulationScheduler
 import roadsimulation.simulation.SimulationScheduler.{Continuation, EventReference, Interrupted, OnTime, SimEvent}
-import zio.UIO
-import zio.ZIO
+import zio.{Hub, UIO, ZIO}
 
 import java.util.concurrent.ConcurrentSkipListMap
 import scala.collection.concurrent.TrieMap
@@ -18,7 +17,8 @@ class PersonHandler(
   scenario: Scenario,
   vehicleHandler: VehicleHandler,
   personsOnRoad: ConcurrentSkipListMap[PositionKey[Person], (Person, EventReference[Vehicle])],
-  scheduler: SimulationScheduler
+  scheduler: SimulationScheduler,
+  messageHub: Hub[StoredRoadEvent]
 ):
   private val personToVehicle = TrieMap.empty[Id[Person], Id[TripPlan]]
 
@@ -30,6 +30,7 @@ class PersonHandler(
 
   def onRoad(person: Person): UIO[Unit] = {
     val currentPositionKey = PositionKey(person.positionInM, person.time, person.id)
+    messageHub.publish(PersonGotToRoad(person)) *>
     scheduler.continueWhen[Vehicle](person.time + 3600, eventRef => for {
       _ <- ZIO.succeed(personsOnRoad.put(currentPositionKey, (person, eventRef)))
       vehicleMovements <- vehicleHandler.getAllApproachingVehicles(person.time + 20, person.positionInM)

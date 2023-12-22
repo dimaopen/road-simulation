@@ -27,9 +27,9 @@ class MethodVehicleHandler(
     position: Double
   ): UIO[Seq[(Movement, Double)]] = vehicleSpatialIndex.getAllApproachingVehicles(time, position)
 
-  private val passengers = TrieMap.empty[Id[TripPlan], Seq[Id[Person]]]
+  private val passengers = TrieMap.empty[Id[Vehicle], Seq[Id[Person]]]
 
-  override def takePassenger(vehicleId: Id[TripPlan], personId: Id[Person]): UIO[Seq[Id[Person]]] = {
+  override def takePassenger(vehicleId: Id[Vehicle], personId: Id[Person]): UIO[Seq[Id[Person]]] = {
     ZIO.succeed(passengers.updateWith(vehicleId) {
       case Some(passengerList) if passengerList.contains(personId) => throw new IllegalArgumentException(
         s"Vehicle $vehicleId has passengers $passengerList. It cannot add $personId again."
@@ -58,12 +58,7 @@ class MethodVehicleHandler(
       findFillingStationAndFillVehicle(plan, vehicle)
     else
       for {
-        nextVehicle <- goToPosition(
-          searchPosition,
-          vehicle,
-          scenario.speedLimitInMPerS,
-          scenario.roadLengthInM,
-        )
+        nextVehicle <- goToPosition(searchPosition, vehicle, scenario.speedLimitInMPerS)
         filledVehicle <- ZIO.when(nextVehicle.positionInM >=~ searchPosition) {
           findFillingStationAndFillVehicle(plan, nextVehicle)
         }
@@ -89,32 +84,18 @@ class MethodVehicleHandler(
     fillingStationHandler.findNearestStationAfter(vehicle.positionInM) match
       case Some(station) =>
         for {
-          nextVehicle <- goToPosition(station.fillingStation.positionInM,
-            vehicle,
-            scenario.speedLimitInMPerS,
-            scenario.roadLengthInM,
-          )
+          nextVehicle <- goToPosition(station.fillingStation.positionInM, vehicle, scenario.speedLimitInMPerS)
           filledVehicle <- ZIO.when(nextVehicle.positionInM >=~ station.fillingStation.positionInM) {
             station.enter(nextVehicle, nextVehicle.time)
           }
         } yield filledVehicle.getOrElse(nextVehicle)
 
       case None =>
-        goToPosition(
-          scenario.roadLengthInM,
-          vehicle,
-          scenario.speedLimitInMPerS,
-          scenario.roadLengthInM,
-        )
+        goToPosition(scenario.roadLengthInM, vehicle, scenario.speedLimitInMPerS)
   }
 
 
-  private def goToPosition(
-    positionInM: Double,
-    vehicle: Vehicle,
-    speedLimitInMPerS: Double,
-    roadLengthInM: Double,
-  ): UIO[Vehicle] =
+  private def goToPosition(positionInM: Double, vehicle: Vehicle, speedLimitInMPerS: Double): UIO[Vehicle] =
     val targetPosition = math.min(positionInM, scenario.roadLengthInM)
     val nextPerson = Option(personsOnRoad.ceilingEntry(PositionKey.minKeyForPosition(vehicle.positionInM)))
       .map(_.getValue)
@@ -135,7 +116,7 @@ class MethodVehicleHandler(
                   nextVehicle.copy(passengers = nextVehicle.passengers :+ person)
                 else
                   nextVehicle
-                finVeh <- goToPosition(targetPosition, veh, speedLimitInMPerS, roadLengthInM)
+                finVeh <- goToPosition(targetPosition, veh, speedLimitInMPerS)
               } yield finVeh
             }
           } yield finalVehicle.getOrElse(nextVehicle)
@@ -146,7 +127,6 @@ class MethodVehicleHandler(
             _ <- zio.Console.printLine(s"$actualVehicle interrupted by $person").orDie
           } yield actualVehicle
       }
-
 
 end MethodVehicleHandler
 

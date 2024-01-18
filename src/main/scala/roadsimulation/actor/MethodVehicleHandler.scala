@@ -1,11 +1,11 @@
 package roadsimulation.actor
 
-import roadsimulation.model.{>=~, Id, Person, PositionKey, Scenario, TripPlan, Vehicle}
+import roadsimulation.model.*
 import roadsimulation.actor.RoadEventType.{RunOutOfGas, VehicleAtPosition, VehicleContinueTraveling}
 import roadsimulation.actor.VehicleHandlerImpl.calculatePositionToStartSearchingForFuelStation
 import roadsimulation.simulation.SimulationScheduler
 import roadsimulation.simulation.SimulationScheduler.{Continuation, ContinuationStatus, EventReference, Interrupted, OnTime, SimEvent}
-import zio.{Exit, UIO, ZIO}
+import zio.{Exit, Hub, UIO, ZIO}
 
 import java.util.concurrent.ConcurrentSkipListMap
 import scala.collection.concurrent.TrieMap
@@ -18,6 +18,7 @@ class MethodVehicleHandler(
   scheduler: SimulationScheduler,
   fillingStationHandler: FillingStationHandler,
   personsOnRoad: ConcurrentSkipListMap[PositionKey[Person], (Person, EventReference[Vehicle])],
+  messageHub: Hub[StoredRoadEvent],
 ) extends VehicleHandler:
 
   private val vehicleSpatialIndex = new VehicleSpatialIndex
@@ -66,10 +67,9 @@ class MethodVehicleHandler(
     resultVehicle.flatMap {
       case vehicle if vehicle.positionInM >=~ scenario.roadLengthInM =>
         // we reached the destination, end up here
-        //todo replace with the EndTravel event
-        zio.Console.printLine(s"$vehicle is finished").orDie
+        messageHub.publish(VehicleReachedDestination(vehicle)) as ()
       case vehicle if vehicle.isRunOutOfGas =>
-        zio.Console.printLine(s"$vehicle is finished with ROOG").orDie
+        messageHub.publish(VehicleRunOutOfGas(vehicle)) as ()
       case vehicle =>
         //continue travelling
         travelCycle(plan, vehicle)
@@ -111,12 +111,11 @@ class MethodVehicleHandler(
             finalVehicle <- ZIO.when(nextPerson.isDefined) {
               val (person, eventRef) = nextPerson.get
               for {
-                cancelled <- scheduler.cancel(eventRef, nextVehicle)
-                veh = if cancelled then
-                  nextVehicle.copy(passengers = nextVehicle.passengers :+ person)
-                else
-                  nextVehicle
-                finVeh <- goToPosition(targetPosition, veh, speedLimitInMPerS)
+                veh <- ZIO.whenZIO(scheduler.cancel(eventRef, nextVehicle)) {
+                  val boardedVehicle = nextVehicle.copy(passengers = nextVehicle.passengers :+ person)
+                  messageHub.publish(PersonBoardedVehicle(person, boardedVehicle)) as boardedVehicle
+                }
+                finVeh <- goToPosition(targetPosition, veh.getOrElse(nextVehicle), speedLimitInMPerS)
               } yield finVeh
             }
           } yield finalVehicle.getOrElse(nextVehicle)

@@ -21,7 +21,7 @@ object Simulation {
         _ <- EventWriter.fromHub(messageHub).fork
         fillingStationHandler <- FillingStationHandler.make(scenario, scheduler)
         personsOnRoad = new ConcurrentSkipListMap[PositionKey[Person], (Person, EventReference[Vehicle])](PositionKey.ordering)
-        vehicleHandler = new MethodVehicleHandler(scenario, scheduler, fillingStationHandler, personsOnRoad)
+        vehicleHandler = new MethodVehicleHandler(scenario, scheduler, fillingStationHandler, personsOnRoad, messageHub)
         personHandler = new PersonHandler(scenario, vehicleHandler, personsOnRoad, scheduler, messageHub)
         _ <- vehicleHandler.scheduleInitialEvents(scenario)
         _ <- personHandler.scheduleInitialEvents(scenario)

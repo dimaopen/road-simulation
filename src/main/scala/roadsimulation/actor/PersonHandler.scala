@@ -1,7 +1,8 @@
 package roadsimulation.actor
 
 
-import roadsimulation.model.{Id, Person, PersonGotToRoad, PositionKey, Scenario, StoredRoadEvent, TripPlan, Vehicle}
+import roadsimulation.model.{Id, Person, PositionKey, Scenario, TripPlan, Vehicle}
+import roadsimulation.model.event.*
 import roadsimulation.actor.RoadEventType.*
 import roadsimulation.simulation.SimulationScheduler
 import roadsimulation.simulation.SimulationScheduler.{Continuation, EventReference, Interrupted, OnTime, SimEvent}

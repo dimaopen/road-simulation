@@ -1,6 +1,7 @@
 package roadsimulation.actor
 
 import roadsimulation.model.*
+import roadsimulation.model.event.*
 import roadsimulation.actor.RoadEventType.{RunOutOfGas, VehicleAtPosition, VehicleContinueTraveling}
 import roadsimulation.actor.VehicleHandlerImpl.calculatePositionToStartSearchingForFuelStation
 import roadsimulation.simulation.SimulationScheduler

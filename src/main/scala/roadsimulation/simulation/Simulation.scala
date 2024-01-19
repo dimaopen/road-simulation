@@ -1,7 +1,8 @@
 package roadsimulation.simulation
 
 import roadsimulation.actor.{FillingStationHandler, MethodVehicleHandler, PersonHandler, RoadEventType, VehicleHandlerImpl}
-import roadsimulation.model.{Person, PositionKey, Scenario, Vehicle, StoredRoadEvent}
+import roadsimulation.model.event.StoredRoadEvent
+import roadsimulation.model.{Person, PositionKey, Scenario, Vehicle}
 import roadsimulation.simulation.SimulationScheduler.EventReference
 import zio.*
 import zio.stream.*

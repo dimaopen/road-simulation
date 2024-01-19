@@ -41,14 +41,10 @@ class PersonHandler(
     } yield ()
     ).flatMap{
       case Continuation(time, OnTime) =>
-        zio.Console.printLine(s"No one has taken $person within an hour ($time).").orDie
-          .as(personsOnRoad.remove(currentPositionKey))
+          ZIO.succeed(personsOnRoad.remove(currentPositionKey))
           *> onRoad(person.copy(time = time))
       case Continuation(time, Interrupted(vehicle: Vehicle)) =>
-        for {
-          _ <- ZIO.succeed(personsOnRoad.remove(currentPositionKey))
-          _ <- zio.Console.printLine(s"$vehicle has taken $person at $time.").orDie
-        } yield ()
+        ZIO.succeed(personsOnRoad.remove(currentPositionKey))
     }
 
   }

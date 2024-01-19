@@ -49,7 +49,7 @@ class MethodVehicleHandler(
         passengers = Seq.empty,
         positionInM = 0.0,
         time = plan.startTime)
-      scheduler.schedule(plan.startTime, travelCycle(plan, vehicle))
+      scheduler.schedule(plan.startTime, messageHub.publish(VehicleTripStarted(vehicle)) *> travelCycle(plan, vehicle))
     }
   } yield ()
 
@@ -113,8 +113,8 @@ class MethodVehicleHandler(
               val (person, eventRef) = nextPerson.get
               for {
                 veh <- ZIO.whenZIO(scheduler.cancel(eventRef, nextVehicle)) {
-                  val boardedVehicle = nextVehicle.copy(passengers = nextVehicle.passengers :+ person)
-                  messageHub.publish(PersonBoardedVehicle(person, boardedVehicle)) as boardedVehicle
+                  messageHub.publish(PersonBoardedVehicle(person, nextVehicle)) as
+                    nextVehicle.copy(passengers = nextVehicle.passengers :+ person)
                 }
                 finVeh <- goToPosition(targetPosition, veh.getOrElse(nextVehicle), speedLimitInMPerS)
               } yield finVeh
@@ -124,7 +124,6 @@ class MethodVehicleHandler(
           for {
             _ <- vehicleSpatialIndex.removeVehicleMovement(vehicle.id)
             actualVehicle = vehicle.driveUntilTime(time, speedLimitInMPerS)
-            _ <- zio.Console.printLine(s"$actualVehicle interrupted by $person").orDie
           } yield actualVehicle
       }
 

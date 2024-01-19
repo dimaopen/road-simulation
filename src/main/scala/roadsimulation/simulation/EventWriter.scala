@@ -41,42 +41,42 @@ object EventWriter:
   private def rowToArray(row: EventRow): Array[AnyRef] =
     val array = row.toArray
     array(5) = row._6.mkString(":")
+    if row._7 < 0 then array(6) = ""
     array
 
 
   private def eventToRow(event: StoredRoadEvent): EventRow =
     event match
-      case PersonGotToRoad(person) =>
+      case e: VehicleEvent with PersonEvent =>
         (
           event.getClass.getSimpleName,
-          person.time,
-          person.positionInM,
-          person.id,
+          e.vehicle.time,
+          e.vehicle.positionInM,
+          e.person.id,
+          e.vehicle.id,
+          e.vehicle.passengers.map(_.id),
+          e.vehicle.passengers.length
+        )
+      case e: PersonEvent =>
+        (
+          event.getClass.getSimpleName,
+          e.person.time,
+          e.person.positionInM,
+          e.person.id,
           Id.empty,
           Seq.empty,
-          0
+          -1
         )
-      case PersonBoardedVehicle(person, vehicle) =>
-        createEventRow(event.getClass.getSimpleName, person.id, vehicle)
-      case VehicleRunOutOfGas(vehicle) =>
-        createEventRow(event.getClass.getSimpleName, Id.empty, vehicle)
-      case VehicleReachedDestination(vehicle) =>
-        createEventRow(event.getClass.getSimpleName, Id.empty, vehicle)
+      case e: VehicleEvent =>
+        (event.getClass.getSimpleName,
+          e.vehicle.time,
+          e.vehicle.positionInM,
+          Id.empty,
+          e.vehicle.id,
+          e.vehicle.passengers.map(_.id),
+          e.vehicle.passengers.length)
 
 
-  private def createEventRow(
-    evenName: String,
-    personId: Id[Person],
-    vehicle: Vehicle
-  ): EventRow = {
-    (evenName,
-      vehicle.time,
-      vehicle.positionInM,
-      personId,
-      vehicle.id,
-      vehicle.passengers.map(_.id),
-      vehicle.passengers.length)
-  }
 end EventWriter
 
 
